@@ -119,4 +119,5 @@
     font-size: 11px; color: #6b6e7a; background: #1a1c22;
     padding: 3px 8px; border-radius: 3px; border: 1px solid #2a2d35;
   }
-  .role-accolades { font-size: 12px; color: #6b6e7a; font-style:
+  .role-accolades { font-size: 12px; color: #6b6e7a; font-style: italic; line-height: 1.5; }
+</style>
