@@ -23,8 +23,8 @@ def login():
         SESSION_COOKIE_NAME,
         session_id,
         httponly=True,
-        samesite="Strict",
-        secure=True,
+        samesite="Lax",
+        secure=False,
         max_age=60 * 60 * 24 * 7,  # 7 days
     )
     return resp
