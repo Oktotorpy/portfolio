@@ -1,0 +1,24 @@
+[Unit]
+Description=Portfolio CMS Frontend (SvelteKit/Node)
+After=network.target portfolio-backend.service
+
+[Service]
+Type=exec
+User=portfolio
+Group=portfolio
+WorkingDirectory=/opt/portfolio/frontend
+EnvironmentFile=/opt/portfolio/.env
+Environment=NODE_ENV=production
+ExecStart=/bin/bash -c 'PORT=$FRONTEND_PORT ORIGIN=https://$DOMAIN INTERNAL_API_URL=$INTERNAL_API_URL exec /usr/bin/node build/index.js'
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/portfolio
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

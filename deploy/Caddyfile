@@ -1,0 +1,34 @@
+http://${DOMAIN} {
+    # Serve uploaded media files directly
+    handle /uploads/* {
+        root * /opt/portfolio
+        file_server
+    }
+
+    # Proxy API requests to Flask/Gunicorn backend
+    handle /api/* {
+        reverse_proxy localhost:${BACKEND_PORT}
+    }
+
+    # Proxy everything else to SvelteKit frontend
+    handle {
+        reverse_proxy localhost:${FRONTEND_PORT}
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    # Gzip compression
+    encode gzip
+
+    # Logging
+    log {
+        output file /var/log/caddy/portfolio.log
+        format json
+    }
+}

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.svelte-kit/
+build/
+
+# Data
+*.db
+*.db-wal
+*.db-shm
+
+# Uploads
+uploads/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Backups
+backups/
+
+# Logs
+*.log

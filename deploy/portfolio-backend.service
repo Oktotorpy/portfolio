@@ -1,0 +1,29 @@
+[Unit]
+Description=Portfolio CMS Backend (Flask/Gunicorn)
+After=network.target
+
+[Service]
+Type=exec
+User=portfolio
+Group=portfolio
+WorkingDirectory=/opt/portfolio/backend
+EnvironmentFile=/opt/portfolio/.env
+ExecStart=/bin/bash -c 'exec /opt/portfolio/venv/bin/gunicorn \
+    --bind 127.0.0.1:$BACKEND_PORT \
+    --workers 2 \
+    --timeout 120 \
+    --access-logfile /var/log/portfolio/backend-access.log \
+    --error-logfile /var/log/portfolio/backend-error.log \
+    "main:create_app()"'
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/portfolio/data /opt/portfolio/uploads /var/log/portfolio
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
