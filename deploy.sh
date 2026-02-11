@@ -3,20 +3,22 @@ set -euo pipefail
 
 # ============================================================
 # Portfolio CMS - Server Setup & Deployment Script
-# Run as root on a fresh Ubuntu 24.04 VPS
+# Run as root on Ubuntu 24.04 VPS
+#
 # Usage:
-#   ./deploy.sh setup    - First-time server setup
-#   ./deploy.sh deploy   - Deploy/update application code
-#   ./deploy.sh restart  - Restart all services
-#   ./deploy.sh status   - Check service status
-#   ./deploy.sh logs     - Tail all logs
+#   ./deploy.sh setup              - First-time server setup
+#   ./deploy.sh git-init <REPO>    - Connect server to GitHub repo
+#   ./deploy.sh pull               - Pull latest code & rebuild
+#   ./deploy.sh restart            - Restart all services
+#   ./deploy.sh status             - Check service status
+#   ./deploy.sh logs               - Tail all logs
+#   ./deploy.sh stop               - Stop services
 # ============================================================
 
 APP_DIR="/opt/portfolio"
 APP_USER="portfolio"
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$APP_DIR/repo"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -39,7 +41,7 @@ cmd_setup() {
     log "Installing dependencies..."
     apt-get install -y -qq \
         python3 python3-venv python3-pip \
-        nodejs npm sqlite3 gettext \
+        nodejs npm sqlite3 gettext git \
         debian-keyring debian-archive-keyring apt-transport-https curl
 
     # Install Caddy
@@ -63,7 +65,7 @@ cmd_setup() {
 
     # Create directory structure
     log "Creating directories..."
-    mkdir -p "$APP_DIR"/{backend,frontend,uploads,data}
+    mkdir -p "$APP_DIR"/{uploads,data}
     mkdir -p /var/log/{portfolio,caddy}
 
     # Python virtual environment
@@ -74,22 +76,29 @@ cmd_setup() {
 
     # Environment file
     if [[ ! -f "$APP_DIR/.env" ]]; then
-        log "Creating .env from template..."
-        cp "$REPO_DIR/.env.example" "$APP_DIR/.env"
+        if [[ -f "$REPO_DIR/deploy/.env.example" ]]; then
+            cp "$REPO_DIR/deploy/.env.example" "$APP_DIR/.env"
+        else
+            cat > "$APP_DIR/.env" <<'ENVEOF'
+DOMAIN=your-domain.com
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=changeme
+SECRET_KEY=changeme
+DB_PATH=/opt/portfolio/data/portfolio.db
+UPLOAD_DIR=/opt/portfolio/uploads
+CORS_ORIGIN=https://your-domain.com
+BACKEND_PORT=8000
+FRONTEND_PORT=3000
+INTERNAL_API_URL=http://localhost:8000
+ENVEOF
+        fi
         # Generate a random secret key
         SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
         sed -i "s/^SECRET_KEY=changeme$/SECRET_KEY=$SECRET_KEY/" "$APP_DIR/.env"
         warn "Edit $APP_DIR/.env to set DOMAIN, ADMIN_PASSWORD_HASH, etc."
-        warn "Generate password hash with: python3 $REPO_DIR/generate_hash.py"
     else
         log ".env already exists, skipping"
     fi
-
-    # Install systemd services
-    log "Installing systemd services..."
-    cp "$REPO_DIR/portfolio-backend.service" /etc/systemd/system/
-    cp "$REPO_DIR/portfolio-frontend.service" /etc/systemd/system/
-    systemctl daemon-reload
 
     # Set ownership
     chown -R "$APP_USER:$APP_USER" "$APP_DIR"
@@ -98,62 +107,123 @@ cmd_setup() {
     log "Setup complete!"
     echo ""
     echo "Next steps:"
-    echo "  1. Edit $APP_DIR/.env (set DOMAIN, ADMIN_PASSWORD_HASH)"
-    echo "  2. Run: $0 deploy"
-    echo "  3. Run: $0 restart"
+    echo "  1. $0 git-init git@github.com:YOUR_USER/YOUR_REPO.git"
+    echo "  2. Edit $APP_DIR/.env"
+    echo "  3. $0 pull"
 }
 
 # ============================================================
-# DEPLOY - Deploy/update application code
+# GIT-INIT - Clone repo to server
 # ============================================================
-cmd_deploy() {
-    [[ $EUID -ne 0 ]] && err "Deploy must be run as root"
+cmd_git_init() {
+    [[ $EUID -ne 0 ]] && err "Must be run as root"
+    local repo_url="${1:-}"
+    [[ -z "$repo_url" ]] && err "Usage: $0 git-init <GITHUB_REPO_URL>"
+
+    # Generate deploy key if none exists
+    local key_file="/root/.ssh/deploy_key"
+    if [[ ! -f "$key_file" ]]; then
+        log "Generating SSH deploy key..."
+        mkdir -p /root/.ssh
+        ssh-keygen -t ed25519 -f "$key_file" -N "" -C "portfolio-deploy"
+        chmod 600 "$key_file"
+
+        # Configure SSH to use this key for github.com
+        if ! grep -q "deploy_key" /root/.ssh/config 2>/dev/null; then
+            cat >> /root/.ssh/config <<EOF
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile $key_file
+    StrictHostKeyChecking accept-new
+EOF
+            chmod 600 /root/.ssh/config
+        fi
+
+        echo ""
+        log "Deploy key generated. Add this as a Deploy Key in your GitHub repo:"
+        echo "  Settings → Deploy keys → Add deploy key"
+        echo ""
+        cat "${key_file}.pub"
+        echo ""
+        warn "After adding the key to GitHub, run this command again."
+        exit 0
+    fi
+
+    # Clone or update
+    if [[ -d "$REPO_DIR/.git" ]]; then
+        log "Repo already cloned. Pulling latest..."
+        cd "$REPO_DIR"
+        git pull origin main
+    else
+        log "Cloning repository..."
+        rm -rf "$REPO_DIR"
+        git clone "$repo_url" "$REPO_DIR"
+    fi
+
+    chown -R "$APP_USER:$APP_USER" "$REPO_DIR"
+    log "Repository ready at $REPO_DIR"
+    echo ""
+    echo "Next: $0 pull"
+}
+
+# ============================================================
+# PULL - Pull latest code from GitHub & rebuild
+# ============================================================
+cmd_pull() {
+    [[ $EUID -ne 0 ]] && err "Must be run as root"
+    [[ ! -d "$REPO_DIR/.git" ]] && err "No git repo found. Run: $0 git-init <REPO_URL>"
     [[ ! -f "$APP_DIR/.env" ]] && err ".env not found. Run setup first."
 
-    # Load env for domain
     source "$APP_DIR/.env"
+
+    # Pull latest
+    log "Pulling latest from GitHub..."
+    cd "$REPO_DIR"
+    git fetch origin
+    git reset --hard origin/main
 
     # Deploy backend
     log "Deploying backend..."
     rsync -a --delete \
-        "$REPO_DIR/../backend/" \
+        "$REPO_DIR/backend/" \
         "$APP_DIR/backend/" \
         --exclude='__pycache__' \
-        --exclude='*.pyc' \
-        --exclude='portfolio.db' \
-        --exclude='uploads'
+        --exclude='*.pyc'
 
-    # Install Python dependencies
     log "Installing Python dependencies..."
     "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/backend/requirements.txt"
 
     # Deploy frontend
-    log "Deploying frontend source..."
+    log "Deploying frontend..."
     rsync -a --delete \
-        "$REPO_DIR/../frontend/" \
+        "$REPO_DIR/frontend/" \
         "$APP_DIR/frontend/" \
         --exclude='node_modules' \
         --exclude='build' \
         --exclude='.svelte-kit'
 
-    # Build frontend
     log "Installing npm packages..."
     cd "$APP_DIR/frontend"
-    npm ci --silent
+    npm ci --silent 2>/dev/null || npm install --silent
 
     log "Building frontend..."
     npm run build
 
     # Deploy Caddy config
     log "Deploying Caddy config..."
-    # Expand env vars in Caddyfile
     export DOMAIN BACKEND_PORT FRONTEND_PORT
     envsubst '${DOMAIN} ${BACKEND_PORT} ${FRONTEND_PORT}' \
-        < "$REPO_DIR/Caddyfile" \
+        < "$REPO_DIR/deploy/Caddyfile" \
         > /etc/caddy/Caddyfile
 
+    # Install/update systemd services
+    cp "$REPO_DIR/deploy/portfolio-backend.service" /etc/systemd/system/
+    cp "$REPO_DIR/deploy/portfolio-frontend.service" /etc/systemd/system/
+    systemctl daemon-reload
+
     # Fix ownership
-    chown -R "$APP_USER:$APP_USER" "$APP_DIR/backend" "$APP_DIR/frontend"
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR/backend" "$APP_DIR/frontend" "$REPO_DIR"
 
     # Initialize database if needed
     if [[ ! -f "$APP_DIR/data/portfolio.db" ]]; then
@@ -162,36 +232,38 @@ cmd_deploy() {
         sudo -u "$APP_USER" \
             DB_PATH="$APP_DIR/data/portfolio.db" \
             "$APP_DIR/venv/bin/python" -c "from database import init_db; init_db()"
-        log "Database created at $APP_DIR/data/portfolio.db"
-    else
-        log "Database already exists, skipping init"
+        log "Database created"
     fi
 
-    log "Deploy complete! Run '$0 restart' to apply changes."
-}
-
-# ============================================================
-# RESTART - Restart all services
-# ============================================================
-cmd_restart() {
-    [[ $EUID -ne 0 ]] && err "Restart must be run as root"
-
+    # Restart services
     log "Restarting services..."
     systemctl restart portfolio-backend
     systemctl restart portfolio-frontend
     systemctl reload caddy
 
-    log "Enabling services on boot..."
-    systemctl enable portfolio-backend
-    systemctl enable portfolio-frontend
-    systemctl enable caddy
+    systemctl enable portfolio-backend portfolio-frontend caddy 2>/dev/null
 
+    sleep 2
+    cmd_status
+    log "Deployment complete!"
+}
+
+# ============================================================
+# RESTART
+# ============================================================
+cmd_restart() {
+    [[ $EUID -ne 0 ]] && err "Must be run as root"
+    log "Restarting services..."
+    systemctl restart portfolio-backend
+    systemctl restart portfolio-frontend
+    systemctl reload caddy
+    systemctl enable portfolio-backend portfolio-frontend caddy 2>/dev/null
     sleep 2
     cmd_status
 }
 
 # ============================================================
-# STATUS - Check service status
+# STATUS
 # ============================================================
 cmd_status() {
     echo "=== Service Status ==="
@@ -204,8 +276,6 @@ cmd_status() {
         fi
     done
     echo ""
-
-    # Quick health check
     source "$APP_DIR/.env" 2>/dev/null || true
     if curl -sf "http://localhost:${BACKEND_PORT:-8000}/api/health" > /dev/null 2>&1; then
         echo -e "  Backend API: ${GREEN}healthy${NC}"
@@ -215,18 +285,17 @@ cmd_status() {
 }
 
 # ============================================================
-# LOGS - Tail logs
+# LOGS
 # ============================================================
 cmd_logs() {
-    echo "=== Tailing logs (Ctrl+C to stop) ==="
     journalctl -u portfolio-backend -u portfolio-frontend -u caddy -f --no-hostname
 }
 
 # ============================================================
-# STOP - Stop all services
+# STOP
 # ============================================================
 cmd_stop() {
-    [[ $EUID -ne 0 ]] && err "Stop must be run as root"
+    [[ $EUID -ne 0 ]] && err "Must be run as root"
     log "Stopping services..."
     systemctl stop portfolio-backend portfolio-frontend
     log "Services stopped (Caddy still running)"
@@ -236,22 +305,24 @@ cmd_stop() {
 # Main
 # ============================================================
 case "${1:-}" in
-    setup)   cmd_setup   ;;
-    deploy)  cmd_deploy  ;;
-    restart) cmd_restart ;;
-    status)  cmd_status  ;;
-    logs)    cmd_logs    ;;
-    stop)    cmd_stop    ;;
+    setup)      cmd_setup ;;
+    git-init)   cmd_git_init "${2:-}" ;;
+    pull)       cmd_pull ;;
+    restart)    cmd_restart ;;
+    status)     cmd_status ;;
+    logs)       cmd_logs ;;
+    stop)       cmd_stop ;;
     *)
-        echo "Usage: $0 {setup|deploy|restart|status|logs|stop}"
+        echo "Usage: $0 {setup|git-init|pull|restart|status|logs|stop}"
         echo ""
         echo "Commands:"
-        echo "  setup    - First-time server setup (install deps, create user/dirs)"
-        echo "  deploy   - Deploy/update application code and build frontend"
-        echo "  restart  - Restart all services"
-        echo "  status   - Check service status"
-        echo "  logs     - Tail all service logs"
-        echo "  stop     - Stop backend and frontend services"
+        echo "  setup              - First-time server setup"
+        echo "  git-init <REPO>    - Connect server to a GitHub repo (SSH)"
+        echo "  pull               - Pull latest code, rebuild, restart"
+        echo "  restart            - Restart all services"
+        echo "  status             - Check service status"
+        echo "  logs               - Tail all service logs"
+        echo "  stop               - Stop backend and frontend services"
         exit 1
         ;;
 esac

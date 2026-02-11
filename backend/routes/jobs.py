@@ -4,7 +4,7 @@ from auth import require_auth
 
 bp = Blueprint("jobs", __name__, url_prefix="/api/jobs")
 
-JOB_COLS = "id, name, logo, website, description, date_start, date_end"
+JOB_COLS = "id, name, logo, website, description, date_start, date_end, color"
 
 
 def _row_to_job(db, row):
@@ -55,9 +55,9 @@ def create_job():
 
     db = get_db()
     cursor = db.execute(
-        "INSERT INTO jobs (name, website, description, date_start, date_end) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO jobs (name, website, description, date_start, date_end, color) VALUES (?, ?, ?, ?, ?, ?)",
         (data["name"], data.get("website"), data.get("description", ""),
-         data.get("date_start"), data.get("date_end")),
+         data.get("date_start"), data.get("date_end"), data.get("color", "#3a3d48")),
     )
     job_id = cursor.lastrowid
     _sync_countries(db, job_id, data.get("country_ids", []))
@@ -82,7 +82,7 @@ def update_job(job_id):
         return jsonify({"error": "Job not found"}), 404
 
     updates, values = [], []
-    for field in ["name", "website", "description", "date_start", "date_end"]:
+    for field in ["name", "website", "description", "date_start", "date_end", "color"]:
         if field in data:
             updates.append(f"{field} = ?")
             values.append(data[field])

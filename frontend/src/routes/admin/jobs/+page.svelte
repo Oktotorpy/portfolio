@@ -21,6 +21,7 @@
   let formDateEnd = '';
   let formCountryIds = [];
   let formLogo = null;
+  let formColor = '#3a3d48';
 
   onMount(loadJobs);
 
@@ -42,6 +43,7 @@
     formDateEnd = '';
     formCountryIds = [];
     formLogo = null;
+    formColor = '#3a3d48';
     showModal = true;
   }
 
@@ -54,6 +56,7 @@
     formDateEnd = job.date_end || '';
     formCountryIds = job.countries.map(c => c.id);
     formLogo = job.logo;
+    formColor = job.color || '#3a3d48';
     showModal = true;
   }
 
@@ -67,7 +70,8 @@
         description: formDescription,
         date_start: formDateStart || null,
         date_end: formDateEnd || null,
-        country_ids: formCountryIds
+        country_ids: formCountryIds,
+        color: formColor
       };
 
       let job;
@@ -130,10 +134,11 @@
     {#each jobs as job}
       <div class="item-row">
         <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+          <div style="width: 4px; height: 40px; border-radius: 2px; background: {job.color || '#3a3d48'}; flex-shrink: 0;"></div>
           {#if job.logo}
-            <img src={job.logo} alt="{job.name} logo" class="logo-preview" />
+            <img src={job.logo} alt="{job.name} logo" style="width: 48px; height: 48px; object-fit: contain; border-radius: 4px; background: var(--bg-input); flex-shrink: 0;" />
           {:else}
-            <div class="logo-preview" style="display: flex; align-items: center; justify-content: center; font-size: 20px;">🏢</div>
+            <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; font-size: 20px; background: var(--bg-input); border-radius: 4px; flex-shrink: 0;">🏢</div>
           {/if}
           <div class="item-info">
             <div class="item-name">{job.name}</div>
@@ -192,6 +197,14 @@
       />
     </div>
 
+    <div class="form-group">
+      <label>Color</label>
+      <div class="color-picker-row">
+        <input type="color" bind:value={formColor} class="color-input" />
+        <input type="text" bind:value={formColor} placeholder="#3a3d48" class="color-text" />
+      </div>
+    </div>
+
     <div class="btn-group">
       <button type="submit" class="btn btn-primary" disabled={saving}>
         {saving ? 'Saving...' : editing ? 'Update' : 'Create'}
@@ -200,3 +213,35 @@
     </div>
   </form>
 </Modal>
+
+<style>
+  .color-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .color-input {
+    width: 44px;
+    height: 36px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    cursor: pointer;
+  }
+
+  .color-input::-webkit-color-swatch-wrapper {
+    padding: 2px;
+  }
+
+  .color-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+  }
+
+  .color-text {
+    flex: 1;
+    font-family: monospace;
+  }
+</style>

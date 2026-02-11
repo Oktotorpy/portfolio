@@ -20,4 +20,16 @@ def init_db():
     if not db_exists:
         with open(SCHEMA_PATH) as f:
             conn.executescript(f.read())
+    else:
+        # Run migrations for existing databases
+        _migrate(conn)
     conn.close()
+
+
+def _migrate(conn):
+    """Add missing columns to existing databases."""
+    # Check if jobs.color exists
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    if "color" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN color TEXT DEFAULT '#3a3d48'")
+        conn.commit()

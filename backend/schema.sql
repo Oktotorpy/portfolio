@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     description TEXT DEFAULT '',
     date_start DATE DEFAULT NULL,
     date_end DATE DEFAULT NULL,
+    color TEXT DEFAULT '#3a3d48',        -- hex color for timeline display
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
