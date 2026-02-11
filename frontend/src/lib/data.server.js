@@ -30,7 +30,7 @@ export async function loadPortfolioData(fetch) {
     console.error('Failed to load portfolio data:', err);
     return {
       contact: {},
-      lookups: { work_types: [], skills: [], countries: [], proficiencies: [] },
+      lookups: { work_types: [], skills: [], countries: [], proficiencies: [], tools: [], weights: [] },
       jobs: [],
       roles: [],
       projects: [],

@@ -4,7 +4,7 @@ from auth import require_auth
 
 bp = Blueprint("roles", __name__, url_prefix="/api/roles")
 
-ROLE_COLS = "id, name, job_id, description, accolades, date_start, date_end"
+ROLE_COLS = "id, name, job_id, department, description, accolades, date_start, date_end"
 
 
 def _row_to_role(db, row):
@@ -59,8 +59,8 @@ def create_role():
 
     db = get_db()
     cursor = db.execute(
-        "INSERT INTO roles (name, job_id, description, accolades, date_start, date_end) VALUES (?, ?, ?, ?, ?, ?)",
-        (data["name"], data["job_id"], data.get("description", ""), data.get("accolades", ""),
+        "INSERT INTO roles (name, job_id, department, description, accolades, date_start, date_end) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (data["name"], data["job_id"], data.get("department", ""), data.get("description", ""), data.get("accolades", ""),
          data.get("date_start"), data.get("date_end")),
     )
     role_id = cursor.lastrowid
@@ -86,7 +86,7 @@ def update_role(role_id):
         return jsonify({"error": "Role not found"}), 404
 
     updates, values = [], []
-    for field in ["name", "job_id", "description", "accolades", "date_start", "date_end"]:
+    for field in ["name", "job_id", "department", "description", "accolades", "date_start", "date_end"]:
         if field in data:
             updates.append(f"{field} = ?")
             values.append(data[field])

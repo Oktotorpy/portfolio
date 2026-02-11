@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS work_types (
     name TEXT NOT NULL UNIQUE
 );
 
+CREATE TABLE IF NOT EXISTS tools (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS weights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
+
 -- Seed lookup data
 INSERT INTO countries (name) VALUES ('Czechia'), ('Ukraine'), ('USA');
 
@@ -60,16 +70,28 @@ INSERT INTO work_types (name) VALUES
     ('Graphics'),
     ('Management');
 
+INSERT INTO tools (name) VALUES
+    ('Claude'),
+    ('Premiere'),
+    ('Photoshop');
+
+INSERT INTO weights (name) VALUES
+    ('Small'),
+    ('Medium'),
+    ('Big'),
+    ('Landmark'),
+    ('Continuous');
+
 -- Jobs
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    logo TEXT DEFAULT NULL,          -- file path to logo image
+    logo TEXT DEFAULT NULL,
     website TEXT DEFAULT NULL,
     description TEXT DEFAULT '',
     date_start DATE DEFAULT NULL,
     date_end DATE DEFAULT NULL,
-    color TEXT DEFAULT '#3a3d48',        -- hex color for timeline display
+    color TEXT DEFAULT '#3a3d48',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -85,6 +107,7 @@ CREATE TABLE IF NOT EXISTS roles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    department TEXT DEFAULT '',
     description TEXT DEFAULT '',
     accolades TEXT DEFAULT '',
     date_start DATE DEFAULT NULL,
@@ -107,10 +130,20 @@ CREATE TABLE IF NOT EXISTS projects (
     description TEXT DEFAULT '',
     date_of_creation DATE DEFAULT NULL,
     link TEXT DEFAULT NULL,
+    weight_id INTEGER DEFAULT NULL REFERENCES weights(id) ON DELETE SET NULL,
+    -- Legacy single-content columns (kept for migration, use project_media instead)
     content_type TEXT DEFAULT NULL CHECK (content_type IN ('image', 'video', 'youtube')),
-    content_value TEXT DEFAULT NULL,  -- file path for image/video, embed URL for youtube
+    content_value TEXT DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS project_media (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video', 'youtube')),
+    media_value TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS project_skills (
@@ -123,4 +156,10 @@ CREATE TABLE IF NOT EXISTS project_work_types (
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     work_type_id INTEGER NOT NULL REFERENCES work_types(id) ON DELETE CASCADE,
     PRIMARY KEY (project_id, work_type_id)
+);
+
+CREATE TABLE IF NOT EXISTS project_tools (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    tool_id INTEGER NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+    PRIMARY KEY (project_id, tool_id)
 );

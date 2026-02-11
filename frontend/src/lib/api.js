@@ -62,7 +62,9 @@ export const api = {
   updateLookup: (table, id, name) => request('PUT', `/api/lookups/${table}/${id}`, { name }),
   deleteLookup: (table, id) => request('DELETE', `/api/lookups/${table}/${id}`),
 
-  // Uploads
+  // Uploads / Files
+  listFiles: () => request('GET', '/api/uploads'),
+  deleteFile: (filename) => request('DELETE', `/api/uploads/${filename}`),
   upload: async (file) => {
     const form = new FormData();
     form.append('file', file);

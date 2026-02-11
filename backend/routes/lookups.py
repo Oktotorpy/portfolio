@@ -4,7 +4,7 @@ from auth import require_auth
 
 bp = Blueprint("lookups", __name__, url_prefix="/api/lookups")
 
-ALLOWED_TABLES = {"countries", "skills", "work_types", "proficiencies"}
+ALLOWED_TABLES = {"countries", "skills", "work_types", "proficiencies", "tools", "weights"}
 
 
 @bp.route("", methods=["GET"])
@@ -34,7 +34,7 @@ def add_lookup(table_name):
     existing = db.execute(f"SELECT id FROM {table_name} WHERE name = ?", (name,)).fetchone()
     if existing:
         db.close()
-        return jsonify({"error": f"'{name}' already exists"}), 409
+        return jsonify({"id": existing["id"], "name": name}), 200
 
     cursor = db.execute(f"INSERT INTO {table_name} (name) VALUES (?)", (name,))
     db.commit()

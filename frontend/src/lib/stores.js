@@ -6,8 +6,9 @@ export const lookups = writable({
   countries: [],
   proficiencies: [],
   skills: [],
-  work_types: []
+  work_types: [],
+  tools: [],
+  weights: []
 });
 
-// Tracks which role should show in the sidebar (based on scroll position)
 export const currentRoleId = writable(null);

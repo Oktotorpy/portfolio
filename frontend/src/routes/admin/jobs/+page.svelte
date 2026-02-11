@@ -4,30 +4,39 @@
   import { lookups } from '$lib/stores.js';
   import Modal from '$lib/components/Modal.svelte';
   import MultiSelect from '$lib/components/MultiSelect.svelte';
-  import FileUpload from '$lib/components/FileUpload.svelte';
+  import MediaManager from '$lib/components/MediaManager.svelte';
 
+  let projects = [];
+  let roles = [];
   let jobs = [];
   let showModal = false;
   let editing = null;
   let message = '';
   let messageType = '';
   let saving = false;
+  let filterRoleId = '';
 
   // Form fields
   let formName = '';
-  let formWebsite = '';
+  let formRoleId = '';
   let formDescription = '';
-  let formDateStart = '';
-  let formDateEnd = '';
-  let formCountryIds = [];
-  let formLogo = null;
-  let formColor = '#3a3d48';
+  let formDateOfCreation = '';
+  let formLink = '';
+  let formWeightId = '';
+  let formSkillIds = [];
+  let formWorkTypeIds = [];
+  let formToolIds = [];
+  let formMedia = [];
 
-  onMount(loadJobs);
+  onMount(async () => {
+    jobs = await api.getJobs();
+    roles = await api.getRoles();
+    await loadProjects();
+  });
 
-  async function loadJobs() {
+  async function loadProjects() {
     try {
-      jobs = await api.getJobs();
+      projects = await api.getProjects(filterRoleId || null);
     } catch (err) {
       message = err.message;
       messageType = 'error';
@@ -37,26 +46,30 @@
   function openCreate() {
     editing = null;
     formName = '';
-    formWebsite = '';
+    formRoleId = roles.length > 0 ? roles[0].id : '';
     formDescription = '';
-    formDateStart = '';
-    formDateEnd = '';
-    formCountryIds = [];
-    formLogo = null;
-    formColor = '#3a3d48';
+    formDateOfCreation = '';
+    formLink = '';
+    formWeightId = '';
+    formSkillIds = [];
+    formWorkTypeIds = [];
+    formToolIds = [];
+    formMedia = [];
     showModal = true;
   }
 
-  function openEdit(job) {
-    editing = job;
-    formName = job.name;
-    formWebsite = job.website || '';
-    formDescription = job.description || '';
-    formDateStart = job.date_start || '';
-    formDateEnd = job.date_end || '';
-    formCountryIds = job.countries.map(c => c.id);
-    formLogo = job.logo;
-    formColor = job.color || '#3a3d48';
+  function openEdit(project) {
+    editing = project;
+    formName = project.name;
+    formRoleId = project.role_id;
+    formDescription = project.description || '';
+    formDateOfCreation = project.date_of_creation || '';
+    formLink = project.link || '';
+    formWeightId = project.weight_id || '';
+    formSkillIds = project.skills.map(s => s.id);
+    formWorkTypeIds = project.work_types.map(wt => wt.id);
+    formToolIds = project.tools.map(t => t.id);
+    formMedia = (project.media || []).map(m => ({ media_type: m.media_type, media_value: m.media_value }));
     showModal = true;
   }
 
@@ -66,30 +79,26 @@
     try {
       const data = {
         name: formName,
-        website: formWebsite || null,
+        role_id: parseInt(formRoleId),
         description: formDescription,
-        date_start: formDateStart || null,
-        date_end: formDateEnd || null,
-        country_ids: formCountryIds,
-        color: formColor
+        date_of_creation: formDateOfCreation || null,
+        link: formLink || null,
+        weight_id: formWeightId ? parseInt(formWeightId) : null,
+        skill_ids: formSkillIds,
+        work_type_ids: formWorkTypeIds,
+        tool_ids: formToolIds,
+        media: formMedia
       };
 
-      let job;
       if (editing) {
-        job = await api.updateJob(editing.id, data);
-        if (formLogo !== editing.logo) {
-          job = await api.updateJobLogo(editing.id, formLogo);
-        }
+        await api.updateProject(editing.id, data);
       } else {
-        job = await api.createJob(data);
-        if (formLogo) {
-          job = await api.updateJobLogo(job.id, formLogo);
-        }
+        await api.createProject(data);
       }
 
       showModal = false;
-      await loadJobs();
-      message = editing ? 'Job updated' : 'Job created';
+      await loadProjects();
+      message = editing ? 'Project updated' : 'Project created';
       messageType = 'success';
     } catch (err) {
       message = err.message;
@@ -99,12 +108,12 @@
     }
   }
 
-  async function deleteJob(job) {
-    if (!confirm(`Delete "${job.name}"? This will also delete all associated roles and projects.`)) return;
+  async function deleteProject(project) {
+    if (!confirm(`Delete "${project.name}"?`)) return;
     try {
-      await api.deleteJob(job.id);
-      await loadJobs();
-      message = 'Job deleted';
+      await api.deleteProject(project.id);
+      await loadProjects();
+      message = 'Project deleted';
       messageType = 'success';
     } catch (err) {
       message = err.message;
@@ -112,65 +121,111 @@
     }
   }
 
-  function formatDate(d) {
-    if (!d) return '—';
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  function getRoleName(roleId) {
+    const role = roles.find(r => r.id === roleId);
+    if (!role) return '—';
+    const job = jobs.find(j => j.id === role.job_id);
+    return `${role.name} @ ${job ? job.name : '?'}`;
   }
+
+  function getWeightName(weightId) {
+    const w = ($lookups.weights || []).find(w => w.id === weightId);
+    return w ? w.name : '';
+  }
+
+  $: if (filterRoleId !== undefined) loadProjects();
+
+  $: rolesByJob = jobs.map(j => ({
+    job: j,
+    roles: roles.filter(r => r.job_id === j.id)
+  })).filter(g => g.roles.length > 0);
 </script>
 
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-  <h1 style="margin-bottom: 0;">Jobs</h1>
-  <button class="btn btn-primary" on:click={openCreate}>+ Add Job</button>
+  <h1 style="margin-bottom: 0;">Projects</h1>
+  <button class="btn btn-primary" on:click={openCreate} disabled={roles.length === 0}>+ Add Project</button>
+</div>
+
+{#if roles.length === 0}
+  <div class="msg msg-error">No roles exist yet. Create a job and role first before adding projects.</div>
+{/if}
+
+<div class="form-group" style="max-width: 300px; margin-bottom: 20px;">
+  <label>Filter by Role</label>
+  <select bind:value={filterRoleId}>
+    <option value="">All Roles</option>
+    {#each rolesByJob as group}
+      <optgroup label={group.job.name}>
+        {#each group.roles as role}
+          <option value={role.id}>{role.name}</option>
+        {/each}
+      </optgroup>
+    {/each}
+  </select>
 </div>
 
 {#if message}
   <div class="msg msg-{messageType}">{message}</div>
 {/if}
 
-{#if jobs.length === 0}
-  <div class="empty">No jobs yet. Click "Add Job" to create one.</div>
+{#if projects.length === 0}
+  <div class="empty">No projects found.</div>
 {:else}
   <div class="item-list">
-    {#each jobs as job}
+    {#each projects as project}
       <div class="item-row">
-        <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-          <div style="width: 4px; height: 40px; border-radius: 2px; background: {job.color || '#3a3d48'}; flex-shrink: 0;"></div>
-          {#if job.logo}
-            <img src={job.logo} alt="{job.name} logo" style="width: 48px; height: 48px; object-fit: contain; border-radius: 4px; background: var(--bg-input); flex-shrink: 0;" />
-          {:else}
-            <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; font-size: 20px; background: var(--bg-input); border-radius: 4px; flex-shrink: 0;">🏢</div>
-          {/if}
-          <div class="item-info">
-            <div class="item-name">{job.name}</div>
-            <div class="item-meta">
-              {formatDate(job.date_start)} — {formatDate(job.date_end)}
-              {#if job.countries.length > 0}
-                · {job.countries.map(c => c.name).join(', ')}
-              {/if}
-            </div>
+        <div class="item-info">
+          <div class="item-name">
+            {project.name}
+            {#if project.weight}
+              <span class="weight-badge">{project.weight.name}</span>
+            {/if}
+          </div>
+          <div class="item-meta">
+            {getRoleName(project.role_id)}
+            {#if project.date_of_creation} · {project.date_of_creation}{/if}
+            {#if project.media?.length > 0} · {project.media.length} media{/if}
+          </div>
+          <div style="margin-top: 4px;">
+            {#each project.work_types as wt}
+              <span class="tag">{wt.name}</span>
+            {/each}
+            {#each project.skills as skill}
+              <span class="tag" style="background: rgba(61,170,109,0.15); color: var(--success);">{skill.name}</span>
+            {/each}
+            {#each project.tools as tool}
+              <span class="tag" style="background: rgba(122,127,170,0.15); color: #7a7faa;">{tool.name}</span>
+            {/each}
           </div>
         </div>
         <div class="item-actions">
-          <button class="btn btn-sm btn-ghost" on:click={() => openEdit(job)}>Edit</button>
-          <button class="btn btn-sm btn-danger" on:click={() => deleteJob(job)}>Delete</button>
+          <button class="btn btn-sm btn-ghost" on:click={() => openEdit(project)}>Edit</button>
+          <button class="btn btn-sm btn-danger" on:click={() => deleteProject(project)}>Delete</button>
         </div>
       </div>
     {/each}
   </div>
 {/if}
 
-<Modal bind:show={showModal} title={editing ? 'Edit Job' : 'New Job'}>
+<Modal bind:show={showModal} title={editing ? 'Edit Project' : 'New Project'}>
   <form on:submit|preventDefault={save}>
     <div class="form-group">
       <label>Name *</label>
       <input type="text" bind:value={formName} required />
     </div>
 
-    <FileUpload bind:value={formLogo} label="Logo" accept="image/*" />
-
     <div class="form-group">
-      <label>Website</label>
-      <input type="url" bind:value={formWebsite} placeholder="https://..." />
+      <label>Role *</label>
+      <select bind:value={formRoleId} required>
+        <option value="" disabled>Select a role...</option>
+        {#each rolesByJob as group}
+          <optgroup label={group.job.name}>
+            {#each group.roles as role}
+              <option value={role.id}>{role.name}</option>
+            {/each}
+          </optgroup>
+        {/each}
+      </select>
     </div>
 
     <div class="form-group">
@@ -180,30 +235,54 @@
 
     <div class="form-row">
       <div class="form-group">
-        <label>Start Date</label>
-        <input type="date" bind:value={formDateStart} />
+        <label>Date of Creation</label>
+        <input type="date" bind:value={formDateOfCreation} />
       </div>
       <div class="form-group">
-        <label>End Date</label>
-        <input type="date" bind:value={formDateEnd} />
+        <label>Link</label>
+        <input type="url" bind:value={formLink} placeholder="https://..." />
       </div>
+    </div>
+
+    <div class="form-group">
+      <label>Weight</label>
+      <select bind:value={formWeightId}>
+        <option value="">None</option>
+        {#each $lookups.weights as w}
+          <option value={w.id}>{w.name}</option>
+        {/each}
+      </select>
     </div>
 
     <div class="form-group">
       <MultiSelect
-        label="Countries"
-        options={$lookups.countries}
-        bind:selected={formCountryIds}
+        label="Work Types"
+        options={$lookups.work_types}
+        bind:selected={formWorkTypeIds}
+        lookupTable="work_types"
       />
     </div>
 
     <div class="form-group">
-      <label>Color</label>
-      <div class="color-picker-row">
-        <input type="color" bind:value={formColor} class="color-input" />
-        <input type="text" bind:value={formColor} placeholder="#3a3d48" class="color-text" />
-      </div>
+      <MultiSelect
+        label="Skills"
+        options={$lookups.skills}
+        bind:selected={formSkillIds}
+        lookupTable="skills"
+      />
     </div>
+
+    <div class="form-group">
+      <MultiSelect
+        label="Tools"
+        options={$lookups.tools}
+        bind:selected={formToolIds}
+        lookupTable="tools"
+      />
+    </div>
+
+    <h3 style="margin-top: 20px;">Media</h3>
+    <MediaManager bind:media={formMedia} />
 
     <div class="btn-group">
       <button type="submit" class="btn btn-primary" disabled={saving}>
@@ -215,33 +294,15 @@
 </Modal>
 
 <style>
-  .color-picker-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .color-input {
-    width: 44px;
-    height: 36px;
-    padding: 2px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    cursor: pointer;
-  }
-
-  .color-input::-webkit-color-swatch-wrapper {
-    padding: 2px;
-  }
-
-  .color-input::-webkit-color-swatch {
-    border: none;
-    border-radius: 2px;
-  }
-
-  .color-text {
-    flex: 1;
-    font-family: monospace;
+  .weight-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    background: rgba(212,162,46,0.15);
+    color: var(--warning);
+    border-radius: 3px;
+    margin-left: 6px;
+    font-weight: 400;
+    vertical-align: middle;
   }
 </style>
