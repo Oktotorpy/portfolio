@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { page } from '$app/stores';
   import { currentRoleId } from '$lib/stores.js';
   import { slugify, unslugify } from '$lib/utils.js';
@@ -28,8 +28,34 @@
     $currentRoleId = projects[0].role_id;
   }
 
-  onMount(() => { setupObserver(); });
+  onMount(async () => {
+    setupObserver();
+    // Scroll to anchor if URL has #project-<id>
+    await tick();
+    scrollToAnchor();
+  });
+
   onDestroy(() => { if (observer) observer.disconnect(); });
+
+  function scrollToAnchor() {
+    const hash = window.location.hash;
+    if (!hash) return;
+    // Small delay to let cards render
+    requestAnimationFrame(() => {
+      const el = document.querySelector(hash);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Brief highlight effect
+        el.style.outline = '2px solid rgba(122, 127, 170, 0.5)';
+        el.style.outlineOffset = '4px';
+        el.style.borderRadius = '8px';
+        setTimeout(() => {
+          el.style.outline = '';
+          el.style.outlineOffset = '';
+        }, 2500);
+      }
+    });
+  }
 
   function setupObserver() {
     if (observer) observer.disconnect();

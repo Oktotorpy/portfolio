@@ -8,20 +8,33 @@
   let copied = false;
   let showLightbox = false;
   let lightboxIndex = 0;
+
+  // Video carousel state (for regular videos/embeds)
   let currentVideoIndex = 0;
+  // Shorts carousel state (pairs of 2)
+  let currentShortsPage = 0;
+  // Click-to-play state for uploaded videos
+  let activeVideoId = null;
+
+  /* ── Helpers ─────────────────────────────────────────── */
 
   function getYouTubeId(url) {
     if (!url) return null;
-    const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-    return match ? match[1] : null;
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  function isShorts(url) {
+    return /youtube\.com\/shorts\//i.test(url || '');
   }
 
   function slugify(text) {
     return text.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/-+/g, '-');
   }
 
+  /* ── Copy project link ───────────────────────────────── */
+
   async function copyLink() {
-    // Derive slug from project's first work type if no slug provided
     const s = slug || (project.work_types?.[0] ? slugify(project.work_types[0].name) : '');
     const url = s
       ? `${window.location.origin}/${s}#project-${project.id}`
@@ -33,27 +46,78 @@
     } catch {}
   }
 
+  /* ── Lightbox ────────────────────────────────────────── */
+
   function openImage(index) {
     lightboxIndex = index;
     showLightbox = true;
   }
 
+  /* ── Video carousel (regular, non-Shorts) ────────────── */
+
   function prevVideo() {
-    currentVideoIndex = (currentVideoIndex - 1 + videoMedia.length) % videoMedia.length;
+    currentVideoIndex = (currentVideoIndex - 1 + regularVideoMedia.length) % regularVideoMedia.length;
+    activeVideoId = null;
   }
   function nextVideo() {
-    currentVideoIndex = (currentVideoIndex + 1) % videoMedia.length;
+    currentVideoIndex = (currentVideoIndex + 1) % regularVideoMedia.length;
+    activeVideoId = null;
   }
 
-  // Group media by type
+  /* ── Shorts carousel (pairs of 2) ───────────────────── */
+
+  function prevShortsPage() {
+    currentShortsPage = (currentShortsPage - 1 + shortsTotalPages) % shortsTotalPages;
+  }
+  function nextShortsPage() {
+    currentShortsPage = (currentShortsPage + 1) % shortsTotalPages;
+  }
+
+  /* ── Click-to-play for uploaded videos ───────────────── */
+
+  function playVideo(id) {
+    activeVideoId = id;
+  }
+
+  /* ── Media classification ────────────────────────────── */
+
   $: imageMedia = (project.media || []).filter(m => m.media_type === 'image');
-  $: videoMedia = (project.media || []).filter(m => m.media_type === 'video' || m.media_type === 'youtube');
-  $: hasMedia = imageMedia.length > 0 || videoMedia.length > 0;
+
+  // YouTube Shorts: portrait embeds
+  $: shortsMedia = (project.media || []).filter(m =>
+    m.media_type === 'youtube' && isShorts(m.media_value)
+  );
+
+  // Regular videos + non-Shorts YouTube
+  $: regularVideoMedia = (project.media || []).filter(m =>
+    m.media_type === 'video' || (m.media_type === 'youtube' && !isShorts(m.media_value))
+  );
+
+  $: hasImages = imageMedia.length > 0;
+  $: hasRegularVideo = regularVideoMedia.length > 0;
+  $: hasShorts = shortsMedia.length > 0;
+  $: hasMedia = hasImages || hasRegularVideo || hasShorts;
+
+  // Shorts pagination: 2 per page
+  $: shortsTotalPages = Math.ceil(shortsMedia.length / 2);
+  $: shortsCurrentPair = shortsMedia.slice(currentShortsPage * 2, currentShortsPage * 2 + 2);
+
+  // Image grid columns based on count
+  $: imageGridCols = imageMedia.length === 1 ? 1
+    : imageMedia.length === 2 ? 2
+    : imageMedia.length === 4 ? 2
+    : 3;
+
   $: roleName = project.role?.name || '';
   $: department = project.role?.department || '';
   $: jobName = project.role?.job?.name || '';
-  // Reset video index when project changes
-  $: if (project.id) currentVideoIndex = 0;
+
+  // Reset carousel states when project changes
+  $: if (project.id) {
+    currentVideoIndex = 0;
+    currentShortsPage = 0;
+    activeVideoId = null;
+  }
 </script>
 
 <article
@@ -64,35 +128,66 @@
 >
   {#if hasMedia}
     <div class="card-media">
-      <!-- Images: mosaic if multiple, single if one -->
-      {#if imageMedia.length === 1}
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <img src={imageMedia[0].media_value} alt={project.name} loading="lazy"
-          class="clickable-img" on:click={() => openImage(0)} />
-      {:else if imageMedia.length > 1}
-        <div class="mosaic" class:mosaic-2={imageMedia.length === 2} class:mosaic-3={imageMedia.length === 3} class:mosaic-4={imageMedia.length >= 4}>
-          {#each imageMedia.slice(0, 4) as img, i}
+
+      <!-- ═══ IMAGES: always on top ═══ -->
+      {#if hasImages}
+        <div class="image-section">
+          {#if imageMedia.length === 1}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-            <img src={img.media_value} alt="{project.name} {i+1}" loading="lazy"
-              class="clickable-img mosaic-img" on:click={() => openImage(i)} />
-          {/each}
-          {#if imageMedia.length > 4}
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
-            <div class="mosaic-more" on:click={() => openImage(4)}>+{imageMedia.length - 4}</div>
+            <img
+              src={imageMedia[0].media_value}
+              alt={project.name}
+              loading="lazy"
+              class="single-img clickable-img"
+              on:click={() => openImage(0)}
+            />
+          {:else}
+            <div class="mosaic cols-{imageGridCols}">
+              {#each imageMedia as img, i}
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
+                <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+                <img
+                  src={img.media_value}
+                  alt="{project.name} {i+1}"
+                  loading="lazy"
+                  class="mosaic-img clickable-img"
+                  on:click={() => openImage(i)}
+                />
+              {/each}
+            </div>
           {/if}
         </div>
       {/if}
 
-      <!-- Videos: with arrow navigation -->
-      {#if videoMedia.length > 0}
-        <div class="video-container">
-          {#if videoMedia[currentVideoIndex].media_type === 'video'}
-            <video src={videoMedia[currentVideoIndex].media_value} controls preload="metadata"></video>
+      <!-- ═══ REGULAR VIDEOS / YOUTUBE (non-Shorts): below images ═══ -->
+      {#if hasRegularVideo}
+        <div class="video-section">
+          {@const currentMedia = regularVideoMedia[currentVideoIndex]}
+
+          {#if currentMedia.media_type === 'video'}
+            <!-- Uploaded video: click-to-play -->
+            {#if activeVideoId === (currentMedia.id || currentVideoIndex)}
+              <video
+                src={currentMedia.media_value}
+                controls
+                autoplay
+                preload="auto"
+                class="video-player"
+              ></video>
+            {:else}
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="video-poster" on:click={() => playVideo(currentMedia.id || currentVideoIndex)}>
+                <div class="poster-placeholder">
+                  <div class="play-btn">▶</div>
+                  <span class="poster-label">Click to play</span>
+                </div>
+              </div>
+            {/if}
           {:else}
-            {@const ytId = getYouTubeId(videoMedia[currentVideoIndex].media_value)}
+            <!-- YouTube embed (regular, landscape) -->
+            {@const ytId = getYouTubeId(currentMedia.media_value)}
             {#if ytId}
               <iframe
                 src="https://www.youtube-nocookie.com/embed/{ytId}"
@@ -100,17 +195,46 @@
                 frameborder="0"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowfullscreen
+                class="yt-landscape"
               ></iframe>
             {/if}
           {/if}
 
-          {#if videoMedia.length > 1}
+          {#if regularVideoMedia.length > 1}
             <button class="video-nav video-prev" on:click={prevVideo}>‹</button>
             <button class="video-nav video-next" on:click={nextVideo}>›</button>
-            <div class="video-counter">{currentVideoIndex + 1}/{videoMedia.length}</div>
+            <div class="video-counter">{currentVideoIndex + 1}/{regularVideoMedia.length}</div>
           {/if}
         </div>
       {/if}
+
+      <!-- ═══ YOUTUBE SHORTS: pairs, carousel ═══ -->
+      {#if hasShorts}
+        <div class="shorts-section">
+          <div class="shorts-pair">
+            {#each shortsCurrentPair as short}
+              {@const ytId = getYouTubeId(short.media_value)}
+              {#if ytId}
+                <iframe
+                  src="https://www.youtube-nocookie.com/embed/{ytId}"
+                  title={project.name}
+                  frameborder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowfullscreen
+                  class="yt-short"
+                ></iframe>
+              {/if}
+            {/each}
+          </div>
+
+          {#if shortsTotalPages > 1}
+            <button class="video-nav shorts-prev" on:click={prevShortsPage}>‹</button>
+            <button class="video-nav shorts-next" on:click={nextShortsPage}>›</button>
+            <div class="shorts-counter">{currentShortsPage + 1}/{shortsTotalPages}</div>
+          {/if}
+        </div>
+      {/if}
+
     </div>
   {/if}
 
@@ -169,6 +293,8 @@
 <Lightbox images={imageMedia} startIndex={lightboxIndex} bind:show={showLightbox} />
 
 <style>
+  /* ── Card layout ────────────────────────────────── */
+
   .project-card {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -178,59 +304,194 @@
     overflow: hidden;
     transition: border-color 0.2s;
   }
-
   .project-card:hover { border-color: #2a2d35; }
   .project-card.no-media { grid-template-columns: 1fr; }
 
+  /* ── Media container ────────────────────────────── */
+
   .card-media {
-    position: relative;
     background: #0f1014;
     display: flex;
     flex-direction: column;
-    min-height: 200px;
+    justify-content: center;
   }
 
-  .card-media > img {
-    width: 100%; height: 100%; object-fit: cover; display: block;
+  /* ── Image section ──────────────────────────────── */
+
+  .image-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .single-img {
+    width: 100%;
+    max-height: 400px;
+    object-fit: cover;
+    display: block;
   }
 
   .clickable-img { cursor: zoom-in; transition: opacity 0.2s; }
   .clickable-img:hover { opacity: 0.85; }
 
-  /* Mosaic layouts */
-  .mosaic { display: grid; width: 100%; height: 100%; min-height: 200px; gap: 2px; }
-  .mosaic-2 { grid-template-columns: 1fr 1fr; }
-  .mosaic-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-  .mosaic-3 .mosaic-img:first-child { grid-row: 1 / 3; }
-  .mosaic-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-  .mosaic-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .mosaic-more {
-    position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7);
-    color: #ddd; font-size: 13px; padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  /* ── Mosaic grid (all images visible) ───────────── */
+
+  .mosaic {
+    display: grid;
+    width: 100%;
+    gap: 2px;
   }
 
-  /* Video container with arrows */
-  .video-container { position: relative; width: 100%; }
-  .video-container video { width: 100%; display: block; }
-  .video-container iframe { width: 100%; aspect-ratio: 16/9; display: block; }
+  .mosaic.cols-1 { grid-template-columns: 1fr; }
+  .mosaic.cols-2 { grid-template-columns: 1fr 1fr; }
+  .mosaic.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
 
+  .mosaic-img {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ── Video section (regular / landscape YT) ─────── */
+
+  .video-section {
+    position: relative;
+    width: 100%;
+  }
+
+  .video-player {
+    width: 100%;
+    display: block;
+    background: #000;
+  }
+
+  .yt-landscape {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    display: block;
+    border: none;
+  }
+
+  /* Click-to-play poster */
+  .video-poster {
+    position: relative;
+    cursor: pointer;
+    width: 100%;
+  }
+
+  .poster-placeholder {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #111318;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: background 0.2s;
+  }
+
+  .video-poster:hover .poster-placeholder {
+    background: #181b22;
+  }
+
+  .play-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: #8a8d98;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-left: 4px;
+    transition: transform 0.2s, background 0.2s, color 0.2s;
+  }
+
+  .video-poster:hover .play-btn {
+    transform: scale(1.1);
+    background: rgba(255, 255, 255, 0.12);
+    color: #e0e2e8;
+  }
+
+  .poster-label {
+    font-size: 12px;
+    color: #4e515c;
+    transition: color 0.2s;
+  }
+
+  .video-poster:hover .poster-label { color: #6b6e7a; }
+
+  /* Video navigation arrows */
   .video-nav {
-    position: absolute; top: 50%; transform: translateY(-50%);
-    background: rgba(0,0,0,0.6); border: none; color: #ccc;
-    font-size: 24px; width: 36px; height: 36px; border-radius: 50%;
-    cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.55);
+    border: none;
+    color: #ccc;
+    font-size: 24px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: all 0.2s;
   }
-  .video-nav:hover { background: rgba(0,0,0,0.85); color: #fff; }
-  .video-prev { left: 8px; }
-  .video-next { right: 8px; }
+  .video-nav:hover { background: rgba(0, 0, 0, 0.85); color: #fff; }
+  .video-prev, .shorts-prev { left: 8px; }
+  .video-next, .shorts-next { right: 8px; }
 
-  .video-counter {
-    position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6);
-    color: #aaa; font-size: 11px; padding: 2px 8px; border-radius: 3px;
+  .video-counter, .shorts-counter {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #aaa;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
   }
 
-  /* Card body */
+  /* ── Shorts section (portrait, pairs of 2) ──────── */
+
+  .shorts-section {
+    position: relative;
+    width: 100%;
+    padding: 4px;
+  }
+
+  .shorts-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+  }
+
+  .yt-short {
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    border: none;
+    border-radius: 4px;
+    display: block;
+  }
+
+  /* Single short on last page: center it */
+  .shorts-pair :global(:only-child) {
+    grid-column: 1 / -1;
+    max-width: 50%;
+    justify-self: center;
+  }
+
+  .shorts-prev, .shorts-next { top: 50%; }
+
+  /* ── Card body ──────────────────────────────────── */
+
   .card-body {
     padding: 24px;
     display: flex;
@@ -241,19 +502,32 @@
   .card-content { flex: 1; }
 
   .card-header {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    gap: 12px; margin-bottom: 6px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
   }
 
   .card-title {
-    font-size: 16px; font-weight: 600; color: #e0e2e8;
-    letter-spacing: -0.01em; line-height: 1.3;
+    font-size: 16px;
+    font-weight: 600;
+    color: #e0e2e8;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
   }
 
   .copy-btn {
-    background: none; border: 1px solid transparent; color: #3a3d48;
-    font-size: 18px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
-    transition: all 0.2s; flex-shrink: 0; line-height: 1;
+    background: none;
+    border: 1px solid transparent;
+    color: #3a3d48;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    line-height: 1;
   }
   .copy-btn:hover { color: #6b6e7a; border-color: #2a2d35; }
   .copy-btn.copied { color: #4a9; }
@@ -277,19 +551,29 @@
   .tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
 
   .skill-tag {
-    font-size: 11px; color: #5a5e6a; background: #111318;
-    padding: 3px 8px; border-radius: 3px; border: 1px solid #1e2028;
+    font-size: 11px;
+    color: #5a5e6a;
+    background: #111318;
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid #1e2028;
   }
 
   .tool-tag {
-    font-size: 11px; color: #7a7faa; background: rgba(122, 127, 170, 0.08);
-    padding: 3px 8px; border-radius: 3px; border: 1px solid rgba(122, 127, 170, 0.2);
+    font-size: 11px;
+    color: #7a7faa;
+    background: rgba(122, 127, 170, 0.08);
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid rgba(122, 127, 170, 0.2);
   }
+
+  /* ── Mobile ─────────────────────────────────────── */
 
   @media (max-width: 768px) {
     .project-card { grid-template-columns: 1fr; }
-    .card-media { min-height: 180px; max-height: 300px; }
+    .card-media { min-height: auto; }
     .card-body { padding: 16px; }
-    .mosaic { min-height: 180px; }
+    .single-img { max-height: 280px; }
   }
 </style>
