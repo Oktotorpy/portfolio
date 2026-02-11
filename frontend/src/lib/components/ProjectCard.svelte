@@ -162,9 +162,9 @@
 
       <!-- ═══ REGULAR VIDEOS / YOUTUBE (non-Shorts): below images ═══ -->
       {#if hasRegularVideo}
-        <div class="video-section">
+        
           {@const currentMedia = regularVideoMedia[currentVideoIndex]}
-
+			<div class="video-section">
           {#if currentMedia.media_type === 'video'}
             <!-- Uploaded video: click-to-play -->
             {#if activeVideoId === (currentMedia.id || currentVideoIndex)}
