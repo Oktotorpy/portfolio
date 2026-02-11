@@ -10,7 +10,7 @@ WorkingDirectory=/opt/portfolio/backend
 EnvironmentFile=/opt/portfolio/.env
 ExecStart=/bin/bash -c 'exec /opt/portfolio/venv/bin/gunicorn \
     --bind 127.0.0.1:$BACKEND_PORT \
-    --workers 2 \
+    --workers 1 \
     --timeout 120 \
     --access-logfile /var/log/portfolio/backend-access.log \
     --error-logfile /var/log/portfolio/backend-error.log \
