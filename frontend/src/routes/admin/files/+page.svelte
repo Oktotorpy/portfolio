@@ -1,56 +1,53 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '$lib/api.js';
-  import { lookups } from '$lib/stores.js';
 
-  let activeTab = 'proficiencies';
+  let files = [];
+  let activeTab = 'image';
   let message = '';
   let messageType = '';
+  let uploading = false;
 
-  let editingId = null;
-  let editingName = '';
-  let newName = '';
+  onMount(loadFiles);
 
-  const tabs = [
-    { key: 'proficiencies', label: 'Proficiencies' },
-    { key: 'skills', label: 'Skills' },
-    { key: 'tools', label: 'Tools' },
-    { key: 'weights', label: 'Weights' },
-    { key: 'work_types', label: 'Work Types' },
-    { key: 'countries', label: 'Countries' }
-  ];
-
-  const tabLabels = {
-    proficiencies: 'proficiency',
-    skills: 'skill',
-    tools: 'tool',
-    weights: 'weight',
-    work_types: 'work type',
-    countries: 'country'
-  };
-
-  function switchTab(key) {
-    activeTab = key;
-    editingId = null;
-    editingName = '';
-    newName = '';
-    message = '';
-  }
-
-  $: items = $lookups[activeTab] || [];
-
-  async function refreshLookups() {
-    $lookups = await api.getLookups();
-  }
-
-  async function addItem() {
-    if (!newName.trim()) return;
-    message = '';
+  async function loadFiles() {
     try {
-      await api.addLookup(activeTab, newName.trim());
-      newName = '';
-      await refreshLookups();
-      message = 'Item added';
+      files = await api.listFiles();
+    } catch (err) {
+      message = err.message;
+      messageType = 'error';
+    }
+  }
+
+  async function handleUpload(e) {
+    const fileList = e.target.files;
+    if (!fileList?.length) return;
+    uploading = true;
+    message = '';
+    let count = 0;
+    try {
+      for (const file of fileList) {
+        await api.upload(file);
+        count++;
+      }
+      await loadFiles();
+      message = `${count} file${count > 1 ? 's' : ''} uploaded`;
+      messageType = 'success';
+    } catch (err) {
+      message = err.message;
+      messageType = 'error';
+    } finally {
+      uploading = false;
+      e.target.value = '';
+    }
+  }
+
+  async function deleteFile(file) {
+    if (!confirm(`Delete "${file.filename}"? This cannot be undone.`)) return;
+    try {
+      await api.deleteFile(file.filename);
+      await loadFiles();
+      message = 'File deleted';
       messageType = 'success';
     } catch (err) {
       message = err.message;
@@ -58,114 +55,121 @@
     }
   }
 
-  function startEdit(item) {
-    editingId = item.id;
-    editingName = item.name;
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
-  function cancelEdit() {
-    editingId = null;
-    editingName = '';
-  }
-
-  async function saveEdit() {
-    if (!editingName.trim()) return;
-    message = '';
-    try {
-      await api.updateLookup(activeTab, editingId, editingName.trim());
-      editingId = null;
-      editingName = '';
-      await refreshLookups();
-      message = 'Item updated';
-      messageType = 'success';
-    } catch (err) {
-      message = err.message;
-      messageType = 'error';
-    }
-  }
-
-  async function deleteItem(item) {
-    if (!confirm(`Delete "${item.name}"? This may fail if the item is currently in use.`)) return;
-    message = '';
-    try {
-      await api.deleteLookup(activeTab, item.id);
-      await refreshLookups();
-      message = 'Item deleted';
-      messageType = 'success';
-    } catch (err) {
-      message = err.message;
-      messageType = 'error';
-    }
-  }
-
-  function handleKeydown(e) {
-    if (e.key === 'Enter') {
-      if (editingId) saveEdit();
-      else addItem();
-    }
-    if (e.key === 'Escape' && editingId) cancelEdit();
-  }
+  $: filtered = files.filter(f => f.type === activeTab);
+  $: imageCount = files.filter(f => f.type === 'image').length;
+  $: videoCount = files.filter(f => f.type === 'video').length;
 </script>
 
-<h1>Settings</h1>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+  <h1 style="margin-bottom: 0;">Files</h1>
+  <label class="btn btn-primary" style="cursor: pointer;">
+    {uploading ? 'Uploading...' : '+ Upload Files'}
+    <input type="file" accept="image/*,video/*" multiple on:change={handleUpload} disabled={uploading} hidden />
+  </label>
+</div>
 
 <div class="tabs">
-  {#each tabs as tab}
-    <button
-      class="tab"
-      class:active={activeTab === tab.key}
-      on:click={() => switchTab(tab.key)}
-    >
-      {tab.label}
-    </button>
-  {/each}
+  <button class="tab" class:active={activeTab === 'image'} on:click={() => activeTab = 'image'}>
+    Images ({imageCount})
+  </button>
+  <button class="tab" class:active={activeTab === 'video'} on:click={() => activeTab = 'video'}>
+    Videos ({videoCount})
+  </button>
 </div>
 
 {#if message}
   <div class="msg msg-{messageType}">{message}</div>
 {/if}
 
-<div class="card" style="display: flex; gap: 8px; align-items: end; margin-bottom: 24px;">
-  <div class="form-group" style="flex: 1; margin-bottom: 0;">
-    <label>Add new {tabLabels[activeTab] || activeTab}</label>
-    <input
-      type="text"
-      bind:value={newName}
-      on:keydown={handleKeydown}
-      placeholder="Enter name..."
-    />
-  </div>
-  <button class="btn btn-primary" on:click={addItem} disabled={!newName.trim()}>Add</button>
-</div>
-
-{#if items.length === 0}
-  <div class="empty">No items yet.</div>
+{#if filtered.length === 0}
+  <div class="empty">No {activeTab}s uploaded yet.</div>
 {:else}
-  <div class="item-list">
-    {#each items as item}
-      <div class="item-row">
-        {#if editingId === item.id}
-          <input
-            type="text"
-            bind:value={editingName}
-            on:keydown={handleKeydown}
-            style="flex: 1; margin-right: 8px;"
-            autofocus
-          />
-          <div class="item-actions">
-            <button class="btn btn-sm btn-primary" on:click={saveEdit}>Save</button>
-            <button class="btn btn-sm btn-ghost" on:click={cancelEdit}>Cancel</button>
-          </div>
-        {:else}
-          <div class="item-info">
-            <div class="item-name">{item.name}</div>
-          </div>
-          <div class="item-actions">
-            <button class="btn btn-sm btn-ghost" on:click={() => startEdit(item)}>Edit</button>
-            <button class="btn btn-sm btn-danger" on:click={() => deleteItem(item)}>Delete</button>
-          </div>
-        {/if}
+  <div class="file-grid">
+    {#each filtered as file}
+      <div class="file-card">
+        <div class="file-preview">
+          {#if file.type === 'image'}
+            <img src={file.path} alt={file.filename} />
+          {:else}
+            <video src={file.path} preload="metadata"></video>
+          {/if}
+        </div>
+        <div class="file-info">
+          <span class="file-name" title={file.filename}>{file.filename}</span>
+          <span class="file-size">{formatSize(file.size)}</span>
+        </div>
+        <div class="file-actions">
+          <button class="btn btn-sm btn-danger" on:click={() => deleteFile(file)}>Delete</button>
+        </div>
       </div>
     {/each}
   </div>
 {/if}
+
+<style>
+  .file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+
+  .file-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .file-preview {
+    width: 100%;
+    height: 140px;
+    background: var(--bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .file-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .file-preview video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .file-info {
+    padding: 8px 10px 4px;
+  }
+
+  .file-name {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-size {
+    display: block;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.6;
+    margin-top: 2px;
+  }
+
+  .file-actions {
+    padding: 4px 10px 10px;
+  }
+</style>
