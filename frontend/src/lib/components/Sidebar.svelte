@@ -52,7 +52,7 @@
       <h1 class="contact-name">{contact.name}</h1>
     {/if}
     {#if contact.email}
-      <a href="mailto:{contact.email}" class="contact-link">{contact.email}</a>
+      <a href="/cdn-cgi/l/email-protection#8ef5ede1e0faefedfaa0ebe3efe7e2f3" class="contact-link">{contact.email}</a>
     {/if}
     {#if contact.linkedin}
       <a href={contact.linkedin} target="_blank" rel="noopener" class="contact-link">LinkedIn ↗</a>
@@ -157,8 +157,8 @@
   }
 
   .role-logo {
-    max-width: 120px;
-    max-height: 40px;
+    max-width: 240px;
+    max-height: 80px;
     object-fit: contain;
     display: block;
     opacity: 0.85;
@@ -222,7 +222,4 @@
   .accolade-text {
     font-size: 12.5px;
     color: #c0c3cc;
-    line-height: 1.5;
-    margin: 0;
-  }
-</style>
+    line-hei
