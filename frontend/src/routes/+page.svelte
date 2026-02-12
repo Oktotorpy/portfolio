@@ -196,6 +196,24 @@
       idx++;
     }
 
+    // Add "Currently" markers to the first (most recent) row for open-ended roles
+    if (result.length > 0 && roles?.length) {
+      const firstRow = result[0];
+      const currentRoles = roles.filter(r => !r.date_end && r.date_start);
+      for (const role of currentRoles) {
+        // Only add if this role doesn't already have a start marker in the first row
+        const alreadyShown = firstRow.roleStarts.some(rs => rs.role.id === role.id);
+        if (!alreadyShown) {
+          const job = jobs.find(j => j.id === role.job_id);
+          firstRow.roleStarts.push({
+            position: 0.95,
+            role: { ...role, job },
+            tag: 'Currently',
+          });
+        }
+      }
+    }
+
     return result;
   }
 
@@ -381,10 +399,9 @@
                 on:mouseenter={() => onRoleProximity(rs.role)}
                 title={rs.role.name}>
                 {#if rs.tag}
-                  <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'}>{rs.tag}</span>
+                  <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'} class:currently={rs.tag === 'Currently'}>{rs.tag}</span>
                 {/if}
                 <span class="tl-role-name">{rs.role.name}</span>
-                <span class="tl-role-underline"></span>
                 <span class="tl-role-icon">◆</span>
               </button>
             {/each}
@@ -607,11 +624,11 @@
 
   .tl-role-tag {
     position: absolute;
-    bottom: calc(100% + 22px);
+    bottom: calc(100% + 28px);
     font-size: 9px;
     font-weight: 700;
-    color: #111114;
-    background: #6b6e7a;
+    color: #e0e2e8;
+    background: #2a5a3a;
     padding: 3px 10px;
     border-radius: 3px;
     white-space: nowrap;
@@ -624,22 +641,21 @@
     color: #111114;
   }
 
+  .tl-role-tag.currently {
+    background: #3a5a8a;
+    color: #e0e2e8;
+  }
+
   .tl-role-name {
     font-size: 12px;
     font-weight: 600;
     color: #6b6e7a;
     white-space: nowrap;
     position: absolute;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + 10px);
     transition: color 0.15s;
-  }
-
-  .tl-role-underline {
-    position: absolute;
-    bottom: calc(100% + 4px);
-    width: 20px;
-    height: 1px;
-    background: #3a3d48;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #3a3d48;
   }
 
   .tl-role-icon {
@@ -655,8 +671,7 @@
     transition: color 0.15s;
   }
 
-  .tl-role-marker:hover .tl-role-name { color: #e0e2e8; }
-  .tl-role-marker:hover .tl-role-underline { background: #6b6e7a; }
+  .tl-role-marker:hover .tl-role-name { color: #e0e2e8; border-bottom-color: #6b6e7a; }
   .tl-role-marker:hover .tl-role-icon { color: #8a8d98; }
 
   /* ── Project dots: base ──────────────────────────── */
@@ -722,12 +737,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     border: 1.5px solid #4e515c;
     border-radius: 4px;
     background: #111114;
-    font-size: 16px;
+    font-size: 15px;
     color: #7a7faa;
     font-weight: 700;
     line-height: 1;
