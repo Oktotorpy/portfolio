@@ -34,6 +34,7 @@
     closePopup();
   }
 
+  // Desktop only: hovering near a role marker previews that role in sidebar
   function onRoleProximity(role) {
     if (isMobile) return;
     if (role?.id) $currentRoleId = role.id;
@@ -41,45 +42,6 @@
 
   $: segMonths = isMobile ? 3 : 12;
   $: rows = buildRows(data.jobs, data.roles, data.projects, segMonths);
-
-  /* ── Pre-compute role index per job (for New role / Promotion tags) ── */
-  $: roleIndexMap = buildRoleIndexMap(data.roles);
-
-  function buildRoleIndexMap(roles) {
-    if (!roles?.length) return {};
-    const byJob = {};
-    for (const r of roles) {
-      if (!r.job_id) continue;
-      if (!byJob[r.job_id]) byJob[r.job_id] = [];
-      byJob[r.job_id].push(r);
-    }
-    const map = {};
-    for (const jobId of Object.keys(byJob)) {
-      byJob[jobId].sort((a, b) => (a.date_start || '').localeCompare(b.date_start || ''));
-      byJob[jobId].forEach((r, i) => { map[r.id] = i; });
-    }
-    return map;
-  }
-
-  function getRoleTag(roleId) {
-    const idx = roleIndexMap[roleId];
-    if (idx === undefined) return '';
-    return idx === 0 ? 'New role' : 'Promotion';
-  }
-
-  /* ── Weight → visual config ──────────────────────────────────────── */
-
-  function getWeightClass(weight) {
-    if (!weight?.name) return 'weight-small';
-    const n = weight.name.toLowerCase();
-    if (n === 'landmark') return 'weight-landmark';
-    if (n === 'continuous') return 'weight-continuous';
-    if (n === 'big') return 'weight-big';
-    if (n === 'medium') return 'weight-medium';
-    return 'weight-small';
-  }
-
-  /* ── Build rows ──────────────────────────────────────────────────── */
 
   function buildRows(jobs, roles, projects, seg) {
     if (!jobs?.length) return [];
@@ -135,8 +97,7 @@
         const rs = role.date_start ? new Date(role.date_start) : null;
         if (rs && rs >= pStart && rs <= pEnd) {
           const job = jobs.find(j => j.id === role.job_id);
-          const tag = getRoleTag(role.id);
-          roleStarts.push({ position: datePos(rs, pStart, pEnd), role: { ...role, job }, tag });
+          roleStarts.push({ position: datePos(rs, pStart, pEnd), role: { ...role, job } });
         }
       }
 
@@ -146,11 +107,7 @@
           const d = new Date(p.date_of_creation);
           return d >= pStart && d <= pEnd;
         })
-        .map(p => ({
-          ...p,
-          position: datePos(new Date(p.date_of_creation), pStart, pEnd),
-          weightClass: getWeightClass(p.weight),
-        }))
+        .map(p => ({ ...p, position: datePos(new Date(p.date_of_creation), pStart, pEnd) }))
         .sort((a, b) => a.position - b.position);
 
       let label;
@@ -174,87 +131,37 @@
     return result;
   }
 
-  /* ── Build colored, stackable segments ───────────────────────────── */
-
   function buildSegments(pStart, pEnd, activeJobs, now) {
     const total = pEnd.getTime() - pStart.getTime();
-    if (total <= 0 || activeJobs.length === 0) return [{ start: 0, end: 1, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 }];
+    if (total <= 0 || activeJobs.length === 0) return [{ start: 0, end: 1, type: 'dashed' }];
 
-    // Sort jobs by date_start (oldest first = bottom of stack)
-    const sortedJobs = [...activeJobs].sort((a, b) =>
-      (a.date_start || '').localeCompare(b.date_start || '')
-    );
-
-    // Build per-job intervals
-    const jobIntervals = sortedJobs.map(job => {
+    const intervals = [];
+    for (const job of activeJobs) {
       const js = Math.max(pStart.getTime(), (job.date_start ? new Date(job.date_start) : now).getTime());
       const je = Math.min(pEnd.getTime(), (job.date_end ? new Date(job.date_end) : now).getTime());
-      return {
-        start: (js - pStart.getTime()) / total,
-        end: (je - pStart.getTime()) / total,
-        color: job.color || '#3a3d48',
-        jobStart: job.date_start || '',
-      };
-    });
-
-    // For each job interval, determine stack position at each point
-    // (how many other job intervals overlap with it)
-    const segments = [];
-    for (let i = 0; i < jobIntervals.length; i++) {
-      const iv = jobIntervals[i];
-      // Count how many jobs overlap at this interval's midpoint
-      const mid = (iv.start + iv.end) / 2;
-      let stackIndex = 0;
-      let stackCount = 0;
-      for (let j = 0; j < jobIntervals.length; j++) {
-        if (jobIntervals[j].start < iv.end && jobIntervals[j].end > iv.start) {
-          // Overlaps
-          if (j < i) stackIndex++;
-          stackCount++;
-        }
-      }
-      segments.push({
-        start: iv.start,
-        end: iv.end,
-        type: 'solid',
-        color: iv.color,
-        stackIndex,
-        stackCount,
-      });
+      intervals.push({ start: (js - pStart.getTime()) / total, end: (je - pStart.getTime()) / total });
     }
 
-    // Add dashed segments for empty gaps
-    // Find the overall covered range
-    const allStarts = jobIntervals.map(iv => iv.start);
-    const allEnds = jobIntervals.map(iv => iv.end);
-    const coveredStart = Math.min(...allStarts);
-    const coveredEnd = Math.max(...allEnds);
-
-    if (coveredStart > 0.001) {
-      segments.push({ start: 0, end: coveredStart, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
-    }
-    if (coveredEnd < 0.999) {
-      segments.push({ start: coveredEnd, end: 1, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
-    }
-
-    // Find interior gaps (where no job covers)
-    const points = new Set();
-    for (const iv of jobIntervals) {
-      points.add(iv.start);
-      points.add(iv.end);
-    }
-    const sorted = [...points].sort((a, b) => a - b);
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const gapStart = sorted[i];
-      const gapEnd = sorted[i + 1];
-      const mid = (gapStart + gapEnd) / 2;
-      const covered = jobIntervals.some(iv => iv.start <= mid && iv.end >= mid);
-      if (!covered && gapEnd - gapStart > 0.001) {
-        segments.push({ start: gapStart, end: gapEnd, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
+    intervals.sort((a, b) => a.start - b.start);
+    const merged = [intervals[0]];
+    for (let i = 1; i < intervals.length; i++) {
+      const last = merged[merged.length - 1];
+      if (intervals[i].start <= last.end + 0.001) {
+        last.end = Math.max(last.end, intervals[i].end);
+      } else {
+        merged.push(intervals[i]);
       }
     }
 
-    return segments;
+    const segs = [];
+    let pos = 0;
+    for (const m of merged) {
+      if (m.start > pos + 0.001) segs.push({ start: pos, end: m.start, type: 'dashed' });
+      segs.push({ start: m.start, end: m.end, type: 'solid' });
+      pos = m.end;
+    }
+    if (pos < 0.999) segs.push({ start: pos, end: 1, type: 'dashed' });
+    return segs;
   }
 
   function datePos(date, start, end) {
@@ -344,20 +251,11 @@
         <div class="tl-row" data-primary-role-id={row.primaryRole?.id || ''}>
           <div class="tl-label">{row.label}</div>
           <div class="tl-track">
-
-            <!-- ═══ SEGMENTS: job-colored, stackable ═══ -->
             {#each row.segments as seg}
-              {#if seg.type === 'dashed'}
-                <div class="tl-segment tl-seg-dashed"
-                  style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%;"></div>
-              {:else}
-                <div class="tl-segment tl-seg-solid"
-                  class:stacked={seg.stackCount > 1}
-                  style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%; background: {seg.color};{seg.stackCount > 1 ? ` height: ${4 / seg.stackCount}px; top: ${(seg.stackIndex * 4) / seg.stackCount}px;` : ''}"></div>
-              {/if}
+              <div class="tl-segment" class:dashed={seg.type === 'dashed'}
+                style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%;"></div>
             {/each}
 
-            <!-- ═══ JOB START MARKERS ═══ -->
             {#each row.jobStarts as js}
               <div class="tl-job-marker" style="left: {js.position * 100}%;">
                 <div class="tl-job-tick"></div>
@@ -368,34 +266,24 @@
               </div>
             {/each}
 
-            <!-- ═══ ROLE MARKERS (medium size with tag) ═══ -->
             {#each row.roleStarts as rs}
               <button class="tl-role-marker" style="left: {rs.position * 100}%;"
                 on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
                 on:mouseenter={() => onRoleProximity(rs.role)}
                 title={rs.role.name}>
-                {#if rs.tag}
-                  <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'}>{rs.tag}</span>
-                {/if}
                 <span class="tl-role-name">{rs.role.name}</span>
-                <span class="tl-role-icon">◆</span>
+                <span class="tl-role-arrow">▲</span>
+                <span class="tl-role-square"></span>
               </button>
             {/each}
 
-            <!-- ═══ PROJECT DOTS (weight-based) ═══ -->
             {#each row.dots as dot, di}
-              <button class="tl-dot {dot.weightClass}" class:active={selectedProject?.id === dot.id}
+              <button class="tl-dot" class:active={selectedProject?.id === dot.id}
                 style="left: {dot.position * 100}%;"
                 on:click|stopPropagation={(e) => openProjectPopup(dot, e)}
                 on:mouseenter={() => onRoleProximity(dot.role)}
                 title={dot.name}>
-                {#if dot.weightClass === 'weight-landmark'}
-                  <span class="tl-dot-icon tl-dot-star">★</span>
-                {:else if dot.weightClass === 'weight-continuous'}
-                  <span class="tl-dot-icon tl-dot-infinity">∞</span>
-                {:else}
-                  <span class="tl-dot-circle"></span>
-                {/if}
+                <span class="tl-dot-circle"></span>
                 <span class="tl-dot-label" class:above={di % 2 === 0} class:below={di % 2 !== 0}>{dot.name}</span>
               </button>
             {/each}
@@ -413,19 +301,18 @@
     <div class="popup-card" style={popupStyle} on:click|stopPropagation>
       <button class="popup-close" on:click={closePopup}>×</button>
       {#if selectedProject.media?.length > 0}
-        {#each [selectedProject.media[0]] as firstMedia}
-          <div class="popup-media">
-            {#if firstMedia.media_type === 'image'}
-              <img src={firstMedia.media_value} alt={selectedProject.name} />
-            {:else if firstMedia.media_type === 'video'}
-              <video src={firstMedia.media_value} controls preload="metadata"></video>
-            {:else if getYouTubeId(firstMedia.media_value)}
-              <iframe src="https://www.youtube-nocookie.com/embed/{getYouTubeId(firstMedia.media_value)}"
-                title={selectedProject.name} frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope" allowfullscreen></iframe>
-            {/if}
-          </div>
-        {/each}
+        {@const firstMedia = selectedProject.media[0]}
+        <div class="popup-media">
+          {#if firstMedia.media_type === 'image'}
+            <img src={firstMedia.media_value} alt={selectedProject.name} />
+          {:else if firstMedia.media_type === 'video'}
+            <video src={firstMedia.media_value} controls preload="metadata"></video>
+          {:else if getYouTubeId(firstMedia.media_value)}
+            <iframe src="https://www.youtube-nocookie.com/embed/{getYouTubeId(firstMedia.media_value)}"
+              title={selectedProject.name} frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope" allowfullscreen></iframe>
+          {/if}
+        </div>
       {/if}
       <div class="popup-body">
         <h3 class="popup-title">{selectedProject.name}</h3>
@@ -472,162 +359,34 @@
 <style>
   .timeline { padding: 24px 0 100px; }
   .tl-empty { display: flex; align-items: center; justify-content: center; padding: 120px 0; color: #2a2d35; font-size: 16px; }
-
   .tl-row { display: flex; align-items: stretch; padding: 44px 0; position: relative; }
   .tl-label { width: 72px; flex-shrink: 0; font-size: 15px; font-weight: 700; color: #3a3d48; display: flex; align-items: center; letter-spacing: 0.01em; user-select: none; }
+  .tl-track { flex: 1; position: relative; height: 2px; align-self: center; }
+  .tl-segment { position: absolute; top: 0; height: 2px; background: #3a3d48; border-radius: 1px; }
+  .tl-segment.dashed { background: none; border-top: 2px dashed #222530; height: 0; }
 
-  /* ── Track: 4px tall ─────────────────────────────── */
-  .tl-track { flex: 1; position: relative; height: 4px; align-self: center; }
-
-  /* ── Segments: colored per job, stackable ─────────── */
-  .tl-segment { position: absolute; }
-
-  .tl-seg-solid {
-    height: 4px;
-    top: 0;
-    border-radius: 2px;
-    transition: background 0.3s;
-  }
-
-  .tl-seg-dashed {
-    top: 1px;
-    height: 0;
-    border-top: 2px dashed #222530;
-  }
-
-  /* ── Job markers ─────────────────────────────────── */
   .tl-job-marker { position: absolute; top: 0; transform: translateX(-50%); z-index: 4; }
   .tl-job-tick { width: 1px; height: 28px; background: #4e515c; margin: 0 auto; }
   .tl-job-info { display: flex; flex-direction: column; align-items: center; margin-top: 6px; white-space: nowrap; }
   .tl-job-name { font-size: 13px; font-weight: 600; color: #8a8d98; }
   .tl-job-country { font-size: 11px; color: #4e515c; margin-top: 1px; }
 
-  /* ── Role markers: medium diamond icon ───────────── */
-  .tl-role-marker {
-    position: absolute; top: 0; transform: translate(-50%, 0);
-    z-index: 5; background: none; border: none; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center;
-    padding: 16px 24px; margin: -16px -24px;
-  }
-
-  .tl-role-tag {
-    position: absolute;
-    bottom: calc(100% + 14px);
-    font-size: 9px;
-    font-weight: 700;
-    color: #111114;
-    background: #6b6e7a;
-    padding: 2px 7px;
-    border-radius: 3px;
-    white-space: nowrap;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-  }
-
-  .tl-role-tag.promotion {
-    background: #b8a46c;
-    color: #111114;
-  }
-
-  .tl-role-name {
-    font-size: 12px; font-weight: 600; color: #6b6e7a;
-    white-space: nowrap; position: absolute;
-    bottom: calc(100% + 2px); transition: color 0.15s;
-  }
-
-  .tl-role-icon {
-    font-size: 12px; color: #4e515c; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-    width: 14px; height: 14px;
-    transform: translateY(-5px);
-    transition: color 0.15s;
-  }
-
+  .tl-role-marker { position: absolute; top: 0; transform: translate(-50%, 0); z-index: 5; background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; padding: 16px 24px; margin: -16px -24px; }
+  .tl-role-name { font-size: 12px; font-weight: 600; color: #6b6e7a; white-space: nowrap; position: absolute; bottom: calc(100% + 2px); transition: color 0.15s; }
+  .tl-role-arrow { font-size: 7px; color: #4e515c; line-height: 1; position: absolute; bottom: 10px; transition: color 0.15s; }
+  .tl-role-square { width: 10px; height: 10px; border: 2px solid #4e515c; border-radius: 2px; background: #111114; display: block; transform: translateY(-4px); transition: all 0.15s; }
   .tl-role-marker:hover .tl-role-name { color: #e0e2e8; }
-  .tl-role-marker:hover .tl-role-icon { color: #8a8d98; }
+  .tl-role-marker:hover .tl-role-arrow { color: #8a8d98; }
+  .tl-role-marker:hover .tl-role-square { border-color: #8a8d98; background: #1a1c22; }
 
-  /* ── Project dots: base ──────────────────────────── */
-  .tl-dot {
-    position: absolute; top: 0; transform: translate(-50%, -50%);
-    z-index: 6; background: none; border: none; cursor: pointer;
-    padding: 10px; display: flex; flex-direction: column; align-items: center;
-  }
-
-  .tl-dot-circle {
-    border-radius: 50%;
-    background: #6b6e7a;
-    border: 2px solid #111114;
-    transition: all 0.15s;
-    display: block;
-  }
-
-  .tl-dot-icon {
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.15s;
-  }
-
-  /* ── Weight: Small (default) ─────────────────────── */
-  .weight-small .tl-dot-circle {
-    width: 8px; height: 8px;
-  }
-
-  /* ── Weight: Medium ──────────────────────────────── */
-  .weight-medium .tl-dot-circle {
-    width: 12px; height: 12px;
-  }
-
-  /* ── Weight: Big ─────────────────────────────────── */
-  .weight-big .tl-dot-circle {
-    width: 16px; height: 16px;
-  }
-
-  /* ── Weight: Landmark (star + glow) ──────────────── */
-  .weight-landmark .tl-dot-star {
-    font-size: 22px;
-    color: #d4af37;
-    filter: drop-shadow(0 0 6px rgba(212, 175, 55, 0.5));
-    transform: translateY(-1px);
-  }
-
-  .weight-landmark:hover .tl-dot-star,
-  .weight-landmark.active .tl-dot-star {
-    color: #f0d060;
-    filter: drop-shadow(0 0 10px rgba(240, 208, 96, 0.7));
-    transform: translateY(-1px) scale(1.2);
-  }
-
-  /* ── Weight: Continuous (infinity) ───────────────── */
-  .weight-continuous .tl-dot-infinity {
-    font-size: 18px;
-    color: #7a7faa;
-    font-weight: 700;
-    transform: translateY(-1px);
-  }
-
-  .weight-continuous:hover .tl-dot-infinity,
-  .weight-continuous.active .tl-dot-infinity {
-    color: #a0a4cc;
-    transform: translateY(-1px) scale(1.15);
-  }
-
-  /* ── Dot hover (circle variants) ─────────────────── */
-  .tl-dot:hover .tl-dot-circle,
-  .tl-dot.active .tl-dot-circle {
-    background: #e0e2e8;
-    transform: scale(1.3);
-  }
-
-  /* ── Dot labels ──────────────────────────────────── */
-  .tl-dot-label {
-    position: absolute; font-size: 12px; color: #4e515c;
-    white-space: nowrap; max-width: 140px; overflow: hidden;
-    text-overflow: ellipsis; transition: color 0.15s; pointer-events: none;
-  }
+  .tl-dot { position: absolute; top: 0; transform: translate(-50%, -50%); z-index: 6; background: none; border: none; cursor: pointer; padding: 10px; display: flex; flex-direction: column; align-items: center; }
+  .tl-dot-circle { width: 10px; height: 10px; border-radius: 50%; background: #6b6e7a; border: 2px solid #111114; transition: all 0.15s; display: block; }
+  .tl-dot:hover .tl-dot-circle, .tl-dot.active .tl-dot-circle { background: #e0e2e8; transform: scale(1.4); }
+  .tl-dot-label { position: absolute; font-size: 12px; color: #4e515c; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; transition: color 0.15s; pointer-events: none; }
   .tl-dot-label.above { bottom: calc(100% - 4px); }
   .tl-dot-label.below { top: calc(100% - 4px); }
   .tl-dot:hover .tl-dot-label { color: #a0a3ae; }
 
-  /* ── Popups ──────────────────────────────────────── */
   .popup-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.35); }
   .popup-card { position: fixed; z-index: 91; background: #1a1c22; border: 1px solid #2a2d35; border-radius: 10px; overflow: hidden; width: 360px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5); }
   .popup-close { position: absolute; top: 8px; right: 8px; z-index: 2; background: rgba(17, 17, 20, 0.7); border: none; color: #6b6e7a; width: 28px; height: 28px; border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.15s; line-height: 1; }
@@ -649,7 +408,6 @@
   .popup-dept { font-size: 13px; color: #4e515c; margin-bottom: 3px; }
   .popup-accolades { font-size: 13px; color: #6b6e7a; font-style: italic; line-height: 1.5; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1e2028; }
 
-  /* ── Mobile ──────────────────────────────────────── */
   @media (max-width: 768px) {
     .tl-row { padding: 36px 0; }
     .tl-label { width: 52px; font-size: 12px; }
@@ -657,7 +415,6 @@
     .tl-job-name { font-size: 11px; }
     .tl-job-country { font-size: 9px; }
     .tl-role-name { font-size: 10px; }
-    .tl-role-tag { font-size: 8px; }
     .popup-card { width: calc(100vw - 32px); max-width: 360px; left: 50% !important; transform: translateX(-50%) !important; top: auto !important; bottom: 68px !important; }
   }
 </style>
