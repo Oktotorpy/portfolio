@@ -14,6 +14,10 @@
   let selectedRole = null;
   let popupStyle = '';
 
+  // Popup media state
+  let popupVideoIndex = 0;
+  let popupShortsPage = 0;
+
   function checkMobile() {
     isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
   }
@@ -54,6 +58,18 @@
     return 'weight-small';
   }
 
+  /* ── YouTube helpers ─────────────────────────────────────────────── */
+
+  function getYouTubeId(url) {
+    if (!url) return null;
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  function isShorts(url) {
+    return /youtube\.com\/shorts\//i.test(url || '');
+  }
+
   /* ── Build rows ──────────────────────────────────────────────────── */
 
   function buildRows(jobs, roles, projects, seg) {
@@ -78,6 +94,12 @@
       const idx = roleIndexMap[roleId];
       if (idx === undefined) return '';
       return idx === 0 ? 'New role' : 'Promotion';
+    }
+
+    // Build a map of job date_start → position (for snapping roles to same position)
+    const jobDateMap = {};
+    for (const job of jobs) {
+      if (job.date_start) jobDateMap[job.id] = job.date_start;
     }
 
     const now = new Date();
@@ -122,7 +144,7 @@
         const js = job.date_start ? new Date(job.date_start) : null;
         if (js && js >= pStart && js <= pEnd) {
           const countries = job.countries?.map(c => c.name).join(', ') || '';
-          jobStarts.push({ position: datePos(js, pStart, pEnd), name: job.name, country: countries, jobId: job.id });
+          jobStarts.push({ position: datePos(js, pStart, pEnd), name: job.name, country: countries, jobId: job.id, dateStr: job.date_start });
         }
       }
 
@@ -132,7 +154,14 @@
         if (rs && rs >= pStart && rs <= pEnd) {
           const job = jobs.find(j => j.id === role.job_id);
           const tag = getRoleTag(role.id);
-          roleStarts.push({ position: datePos(rs, pStart, pEnd), role: { ...role, job }, tag });
+
+          // Snap to job position if role date_start matches job date_start
+          let pos = datePos(rs, pStart, pEnd);
+          if (job && jobDateMap[job.id] === role.date_start) {
+            pos = datePos(new Date(jobDateMap[job.id]), pStart, pEnd);
+          }
+
+          roleStarts.push({ position: pos, role: { ...role, job }, tag });
         }
       }
 
@@ -176,12 +205,10 @@
     const total = pEnd.getTime() - pStart.getTime();
     if (total <= 0 || activeJobs.length === 0) return [{ start: 0, end: 1, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 }];
 
-    // Sort jobs by date_start (oldest first = bottom of stack)
     const sortedJobs = [...activeJobs].sort((a, b) =>
       (a.date_start || '').localeCompare(b.date_start || '')
     );
 
-    // Build per-job intervals
     const jobIntervals = sortedJobs.map(job => {
       const js = Math.max(pStart.getTime(), (job.date_start ? new Date(job.date_start) : now).getTime());
       const je = Math.min(pEnd.getTime(), (job.date_end ? new Date(job.date_end) : now).getTime());
@@ -189,64 +216,39 @@
         start: (js - pStart.getTime()) / total,
         end: (je - pStart.getTime()) / total,
         color: job.color || '#3a3d48',
-        jobStart: job.date_start || '',
       };
     });
 
-    // For each job interval, determine stack position at each point
-    // (how many other job intervals overlap with it)
     const segments = [];
     for (let i = 0; i < jobIntervals.length; i++) {
       const iv = jobIntervals[i];
-      // Count how many jobs overlap at this interval's midpoint
-      const mid = (iv.start + iv.end) / 2;
       let stackIndex = 0;
       let stackCount = 0;
       for (let j = 0; j < jobIntervals.length; j++) {
         if (jobIntervals[j].start < iv.end && jobIntervals[j].end > iv.start) {
-          // Overlaps
           if (j < i) stackIndex++;
           stackCount++;
         }
       }
-      segments.push({
-        start: iv.start,
-        end: iv.end,
-        type: 'solid',
-        color: iv.color,
-        stackIndex,
-        stackCount,
-      });
+      segments.push({ start: iv.start, end: iv.end, type: 'solid', color: iv.color, stackIndex, stackCount });
     }
 
-    // Add dashed segments for empty gaps
-    // Find the overall covered range
     const allStarts = jobIntervals.map(iv => iv.start);
     const allEnds = jobIntervals.map(iv => iv.end);
     const coveredStart = Math.min(...allStarts);
     const coveredEnd = Math.max(...allEnds);
 
-    if (coveredStart > 0.001) {
-      segments.push({ start: 0, end: coveredStart, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
-    }
-    if (coveredEnd < 0.999) {
-      segments.push({ start: coveredEnd, end: 1, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
-    }
+    if (coveredStart > 0.001) segments.push({ start: 0, end: coveredStart, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
+    if (coveredEnd < 0.999) segments.push({ start: coveredEnd, end: 1, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
 
-    // Find interior gaps (where no job covers)
     const points = new Set();
-    for (const iv of jobIntervals) {
-      points.add(iv.start);
-      points.add(iv.end);
-    }
+    for (const iv of jobIntervals) { points.add(iv.start); points.add(iv.end); }
     const sorted = [...points].sort((a, b) => a - b);
     for (let i = 0; i < sorted.length - 1; i++) {
-      const gapStart = sorted[i];
-      const gapEnd = sorted[i + 1];
-      const mid = (gapStart + gapEnd) / 2;
+      const mid = (sorted[i] + sorted[i + 1]) / 2;
       const covered = jobIntervals.some(iv => iv.start <= mid && iv.end >= mid);
-      if (!covered && gapEnd - gapStart > 0.001) {
-        segments.push({ start: gapStart, end: gapEnd, type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
+      if (!covered && sorted[i + 1] - sorted[i] > 0.001) {
+        segments.push({ start: sorted[i], end: sorted[i + 1], type: 'dashed', color: null, stackIndex: 0, stackCount: 1 });
       }
     }
 
@@ -259,9 +261,13 @@
     return Math.max(0.02, Math.min(0.98, (date.getTime() - start.getTime()) / total));
   }
 
+  /* ── Popup helpers ───────────────────────────────────────────────── */
+
   function openProjectPopup(project, event) {
     selectedRole = null;
     selectedProject = project;
+    popupVideoIndex = 0;
+    popupShortsPage = 0;
     positionPopup(event);
   }
 
@@ -294,10 +300,16 @@
     selectedRole = null;
   }
 
-  function getYouTubeId(url) {
-    if (!url) return null;
-    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-    return m ? m[1] : null;
+  /* ── Popup media classification (same rules as ProjectCard) ──────── */
+
+  function getPopupImages(media) {
+    return (media || []).filter(m => m.media_type === 'image');
+  }
+  function getPopupRegularVideos(media) {
+    return (media || []).filter(m => m.media_type === 'video' || (m.media_type === 'youtube' && !isShorts(m.media_value)));
+  }
+  function getPopupShorts(media) {
+    return (media || []).filter(m => m.media_type === 'youtube' && isShorts(m.media_value));
   }
 
   function setupObserver() {
@@ -341,19 +353,17 @@
           <div class="tl-label">{row.label}</div>
           <div class="tl-track">
 
-            <!-- ═══ SEGMENTS: job-colored, stackable ═══ -->
             {#each row.segments as seg}
               {#if seg.type === 'dashed'}
                 <div class="tl-segment tl-seg-dashed"
                   style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%;"></div>
               {:else}
                 <div class="tl-segment tl-seg-solid"
-                  class:stacked={seg.stackCount > 1}
                   style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%; background: {seg.color};{seg.stackCount > 1 ? ` height: ${4 / seg.stackCount}px; top: ${(seg.stackIndex * 4) / seg.stackCount}px;` : ''}"></div>
               {/if}
             {/each}
 
-            <!-- ═══ JOB START MARKERS ═══ -->
+            <!-- ═══ JOB START MARKERS (with vertical tick connecting to line) ═══ -->
             {#each row.jobStarts as js}
               <div class="tl-job-marker" style="left: {js.position * 100}%;">
                 <div class="tl-job-tick"></div>
@@ -364,7 +374,7 @@
               </div>
             {/each}
 
-            <!-- ═══ ROLE MARKERS (medium size with tag) ═══ -->
+            <!-- ═══ ROLE MARKERS ═══ -->
             {#each row.roleStarts as rs}
               <button class="tl-role-marker" style="left: {rs.position * 100}%;"
                 on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
@@ -374,6 +384,7 @@
                   <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'}>{rs.tag}</span>
                 {/if}
                 <span class="tl-role-name">{rs.role.name}</span>
+                <span class="tl-role-underline"></span>
                 <span class="tl-role-icon">◆</span>
               </button>
             {/each}
@@ -388,7 +399,9 @@
                 {#if dot.weightClass === 'weight-landmark'}
                   <span class="tl-dot-icon tl-dot-star">★</span>
                 {:else if dot.weightClass === 'weight-continuous'}
-                  <span class="tl-dot-icon tl-dot-infinity">∞</span>
+                  <span class="tl-dot-icon tl-dot-infinity-wrap">
+                    <span class="tl-dot-infinity-box">∞</span>
+                  </span>
                 {:else}
                   <span class="tl-dot-circle"></span>
                 {/if}
@@ -401,28 +414,86 @@
     </div>
   {/if}
 
-  <!-- PROJECT POPUP -->
+  <!-- ═══ PROJECT POPUP (full media like ProjectCard) ═══ -->
   {#if selectedProject}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="popup-backdrop" on:click={closePopup}></div>
     <div class="popup-card" style={popupStyle} on:click|stopPropagation>
       <button class="popup-close" on:click={closePopup}>×</button>
+
       {#if selectedProject.media?.length > 0}
-        {#each [selectedProject.media[0]] as firstMedia}
-          <div class="popup-media">
-            {#if firstMedia.media_type === 'image'}
-              <img src={firstMedia.media_value} alt={selectedProject.name} />
-            {:else if firstMedia.media_type === 'video'}
-              <video src={firstMedia.media_value} controls preload="metadata"></video>
-            {:else if getYouTubeId(firstMedia.media_value)}
-              <iframe src="https://www.youtube-nocookie.com/embed/{getYouTubeId(firstMedia.media_value)}"
-                title={selectedProject.name} frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope" allowfullscreen></iframe>
+        <div class="popup-media-container">
+          <!-- Images: mosaic at top -->
+          {#each [getPopupImages(selectedProject.media)] as images}
+            {#if images.length === 1}
+              <div class="popup-media">
+                <img src={images[0].media_value} alt={selectedProject.name} />
+              </div>
+            {:else if images.length > 1}
+              <div class="popup-mosaic cols-{Math.min(images.length, 3)}">
+                {#each images as img}
+                  <img src={img.media_value} alt={selectedProject.name} />
+                {/each}
+              </div>
             {/if}
-          </div>
-        {/each}
+          {/each}
+
+          <!-- Regular videos / landscape YouTube -->
+          {#each [getPopupRegularVideos(selectedProject.media)] as videos}
+            {#if videos.length > 0}
+              {#each [videos[popupVideoIndex] || videos[0]] as currentVid}
+                <div class="popup-media popup-video-wrap">
+                  {#if currentVid.media_type === 'video'}
+                    <video src={currentVid.media_value} controls preload="metadata"></video>
+                  {:else}
+                    {#each [getYouTubeId(currentVid.media_value)] as ytId}
+                      {#if ytId}
+                        <iframe src="https://www.youtube-nocookie.com/embed/{ytId}"
+                          title={selectedProject.name} frameborder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                      {/if}
+                    {/each}
+                  {/if}
+                  {#if videos.length > 1}
+                    <div class="popup-vid-nav">
+                      <button on:click|stopPropagation={() => { popupVideoIndex = (popupVideoIndex - 1 + videos.length) % videos.length; }}>‹</button>
+                      <span>{popupVideoIndex + 1}/{videos.length}</span>
+                      <button on:click|stopPropagation={() => { popupVideoIndex = (popupVideoIndex + 1) % videos.length; }}>›</button>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            {/if}
+          {/each}
+
+          <!-- Shorts: pairs -->
+          {#each [getPopupShorts(selectedProject.media)] as shorts}
+            {#if shorts.length > 0}
+              <div class="popup-shorts-pair">
+                {#each shorts.slice(popupShortsPage * 2, popupShortsPage * 2 + 2) as short}
+                  {#each [getYouTubeId(short.media_value)] as ytId}
+                    {#if ytId}
+                      <iframe src="https://www.youtube-nocookie.com/embed/{ytId}"
+                        title={selectedProject.name} frameborder="0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen
+                        class="popup-short-iframe"></iframe>
+                    {/if}
+                  {/each}
+                {/each}
+              </div>
+              {#if Math.ceil(shorts.length / 2) > 1}
+                <div class="popup-vid-nav">
+                  <button on:click|stopPropagation={() => { popupShortsPage = (popupShortsPage - 1 + Math.ceil(shorts.length / 2)) % Math.ceil(shorts.length / 2); }}>‹</button>
+                  <span>{popupShortsPage + 1}/{Math.ceil(shorts.length / 2)}</span>
+                  <button on:click|stopPropagation={() => { popupShortsPage = (popupShortsPage + 1) % Math.ceil(shorts.length / 2); }}>›</button>
+                </div>
+              {/if}
+            {/if}
+          {/each}
+        </div>
       {/if}
+
       <div class="popup-body">
         <h3 class="popup-title">{selectedProject.name}</h3>
         <p class="popup-meta">
@@ -472,10 +543,9 @@
   .tl-row { display: flex; align-items: stretch; padding: 44px 0; position: relative; }
   .tl-label { width: 72px; flex-shrink: 0; font-size: 15px; font-weight: 700; color: #3a3d48; display: flex; align-items: center; letter-spacing: 0.01em; user-select: none; }
 
-  /* ── Track: 4px tall ─────────────────────────────── */
   .tl-track { flex: 1; position: relative; height: 4px; align-self: center; }
 
-  /* ── Segments: colored per job, stackable ─────────── */
+  /* ── Segments ────────────────────────────────────── */
   .tl-segment { position: absolute; }
 
   .tl-seg-solid {
@@ -491,32 +561,61 @@
     border-top: 2px dashed #222530;
   }
 
-  /* ── Job markers ─────────────────────────────────── */
-  .tl-job-marker { position: absolute; top: 0; transform: translateX(-50%); z-index: 4; }
-  .tl-job-tick { width: 1px; height: 28px; background: #4e515c; margin: 0 auto; }
-  .tl-job-info { display: flex; flex-direction: column; align-items: center; margin-top: 6px; white-space: nowrap; }
+  /* ── Job markers (vertical line connecting to track) ── */
+  .tl-job-marker {
+    position: absolute;
+    top: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .tl-job-tick {
+    width: 2px;
+    height: 32px;
+    background: #4e515c;
+    border-radius: 1px;
+  }
+
+  .tl-job-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 6px;
+    white-space: nowrap;
+  }
   .tl-job-name { font-size: 13px; font-weight: 600; color: #8a8d98; }
   .tl-job-country { font-size: 11px; color: #4e515c; margin-top: 1px; }
 
-  /* ── Role markers: medium diamond icon ───────────── */
+  /* ── Role markers ────────────────────────────────── */
   .tl-role-marker {
-    position: absolute; top: 0; transform: translate(-50%, 0);
-    z-index: 5; background: none; border: none; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center;
-    padding: 16px 24px; margin: -16px -24px;
+    position: absolute;
+    top: 0;
+    transform: translate(-50%, 0);
+    z-index: 5;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 24px;
+    margin: -16px -24px;
   }
 
   .tl-role-tag {
     position: absolute;
-    bottom: calc(100% + 14px);
+    bottom: calc(100% + 22px);
     font-size: 9px;
     font-weight: 700;
     color: #111114;
     background: #6b6e7a;
-    padding: 2px 7px;
+    padding: 3px 10px;
     border-radius: 3px;
     white-space: nowrap;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
   }
 
@@ -526,27 +625,53 @@
   }
 
   .tl-role-name {
-    font-size: 12px; font-weight: 600; color: #6b6e7a;
-    white-space: nowrap; position: absolute;
-    bottom: calc(100% + 2px); transition: color 0.15s;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b6e7a;
+    white-space: nowrap;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    transition: color 0.15s;
+  }
+
+  .tl-role-underline {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    width: 20px;
+    height: 1px;
+    background: #3a3d48;
   }
 
   .tl-role-icon {
-    font-size: 12px; color: #4e515c; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-    width: 14px; height: 14px;
+    font-size: 12px;
+    color: #4e515c;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
     transform: translateY(-5px);
     transition: color 0.15s;
   }
 
   .tl-role-marker:hover .tl-role-name { color: #e0e2e8; }
+  .tl-role-marker:hover .tl-role-underline { background: #6b6e7a; }
   .tl-role-marker:hover .tl-role-icon { color: #8a8d98; }
 
   /* ── Project dots: base ──────────────────────────── */
   .tl-dot {
-    position: absolute; top: 0; transform: translate(-50%, -50%);
-    z-index: 6; background: none; border: none; cursor: pointer;
-    padding: 10px; display: flex; flex-direction: column; align-items: center;
+    position: absolute;
+    top: 0;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
   }
 
   .tl-dot-circle {
@@ -558,26 +683,20 @@
   }
 
   .tl-dot-icon {
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: all 0.15s;
   }
 
-  /* ── Weight: Small (default) ─────────────────────── */
-  .weight-small .tl-dot-circle {
-    width: 8px; height: 8px;
-  }
+  /* Weight: Small */
+  .weight-small .tl-dot-circle { width: 8px; height: 8px; }
+  /* Weight: Medium */
+  .weight-medium .tl-dot-circle { width: 12px; height: 12px; }
+  /* Weight: Big */
+  .weight-big .tl-dot-circle { width: 16px; height: 16px; }
 
-  /* ── Weight: Medium ──────────────────────────────── */
-  .weight-medium .tl-dot-circle {
-    width: 12px; height: 12px;
-  }
-
-  /* ── Weight: Big ─────────────────────────────────── */
-  .weight-big .tl-dot-circle {
-    width: 16px; height: 16px;
-  }
-
-  /* ── Weight: Landmark (star + glow) ──────────────── */
+  /* Weight: Landmark (star + glow) */
   .weight-landmark .tl-dot-star {
     font-size: 22px;
     color: #d4af37;
@@ -592,32 +711,55 @@
     transform: translateY(-1px) scale(1.2);
   }
 
-  /* ── Weight: Continuous (infinity) ───────────────── */
-  .weight-continuous .tl-dot-infinity {
-    font-size: 18px;
+  /* Weight: Continuous (infinity in a box) */
+  .tl-dot-infinity-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .tl-dot-infinity-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 18px;
+    border: 1.5px solid #4e515c;
+    border-radius: 4px;
+    background: #111114;
+    font-size: 16px;
     color: #7a7faa;
     font-weight: 700;
-    transform: translateY(-1px);
+    line-height: 1;
+    transition: all 0.15s;
   }
 
-  .weight-continuous:hover .tl-dot-infinity,
-  .weight-continuous.active .tl-dot-infinity {
+  .weight-continuous:hover .tl-dot-infinity-box,
+  .weight-continuous.active .tl-dot-infinity-box {
+    border-color: #7a7faa;
     color: #a0a4cc;
-    transform: translateY(-1px) scale(1.15);
+    background: #16181e;
+    transform: scale(1.1);
   }
 
-  /* ── Dot hover (circle variants) ─────────────────── */
+  /* Dot hover (circle variants) */
   .tl-dot:hover .tl-dot-circle,
   .tl-dot.active .tl-dot-circle {
     background: #e0e2e8;
     transform: scale(1.3);
   }
 
-  /* ── Dot labels ──────────────────────────────────── */
+  /* Dot labels */
   .tl-dot-label {
-    position: absolute; font-size: 12px; color: #4e515c;
-    white-space: nowrap; max-width: 140px; overflow: hidden;
-    text-overflow: ellipsis; transition: color 0.15s; pointer-events: none;
+    position: absolute;
+    font-size: 12px;
+    color: #4e515c;
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.15s;
+    pointer-events: none;
   }
   .tl-dot-label.above { bottom: calc(100% - 4px); }
   .tl-dot-label.below { top: calc(100% - 4px); }
@@ -625,13 +767,58 @@
 
   /* ── Popups ──────────────────────────────────────── */
   .popup-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.35); }
-  .popup-card { position: fixed; z-index: 91; background: #1a1c22; border: 1px solid #2a2d35; border-radius: 10px; overflow: hidden; width: 360px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5); }
+  .popup-card {
+    position: fixed; z-index: 91; background: #1a1c22;
+    border: 1px solid #2a2d35; border-radius: 10px;
+    overflow: hidden; overflow-y: auto;
+    width: 360px; max-height: 80vh;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  }
   .popup-close { position: absolute; top: 8px; right: 8px; z-index: 2; background: rgba(17, 17, 20, 0.7); border: none; color: #6b6e7a; width: 28px; height: 28px; border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.15s; line-height: 1; }
   .popup-close:hover { color: #e0e2e8; }
-  .popup-media { width: 100%; max-height: 200px; overflow: hidden; background: #0f1014; }
-  .popup-media img { width: 100%; height: 200px; object-fit: cover; display: block; }
+
+  /* Popup media container */
+  .popup-media-container { display: flex; flex-direction: column; }
+
+  .popup-media { width: 100%; overflow: hidden; background: #0f1014; }
+  .popup-media img { width: 100%; max-height: 200px; object-fit: cover; display: block; }
   .popup-media video { width: 100%; max-height: 200px; object-fit: contain; display: block; }
-  .popup-media iframe { width: 100%; aspect-ratio: 16/9; display: block; }
+  .popup-media iframe { width: 100%; aspect-ratio: 16/9; display: block; border: none; }
+
+  /* Popup mosaic */
+  .popup-mosaic {
+    display: grid; gap: 1px; background: #0f1014;
+  }
+  .popup-mosaic.cols-2 { grid-template-columns: 1fr 1fr; }
+  .popup-mosaic.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .popup-mosaic img { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; }
+
+  /* Popup video wrap */
+  .popup-video-wrap { position: relative; }
+
+  .popup-vid-nav {
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; padding: 6px 0; background: #111318;
+  }
+  .popup-vid-nav button {
+    background: none; border: 1px solid #2a2d35; color: #8a8d98;
+    width: 26px; height: 26px; border-radius: 50%;
+    cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .popup-vid-nav button:hover { border-color: #4e515c; color: #e0e2e8; }
+  .popup-vid-nav span { font-size: 11px; color: #4e515c; }
+
+  /* Popup shorts */
+  .popup-shorts-pair {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 2px; background: #0f1014;
+  }
+  .popup-short-iframe {
+    width: 100%; aspect-ratio: 9/16; display: block; border: none;
+  }
+
   .popup-body { padding: 18px; }
   .popup-title { font-size: 16px; font-weight: 600; color: #e0e2e8; margin-bottom: 4px; letter-spacing: -0.01em; padding-right: 28px; }
   .popup-meta { font-size: 14px; color: #6b6e7a; margin-bottom: 3px; }
