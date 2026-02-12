@@ -196,23 +196,24 @@
       idx++;
     }
 
-    // Add "Currently" markers to the first (most recent) row for open-ended roles
+    // Add a single "Currently" marker to the first row for all open-ended roles
     if (result.length > 0 && roles?.length) {
       const firstRow = result[0];
       const currentRoles = roles.filter(r => !r.date_end && r.date_start);
-      let currentlyIdx = 0;
-      for (const role of currentRoles) {
-        const alreadyShown = firstRow.roleStarts.some(rs => rs.role.id === role.id);
-        if (!alreadyShown) {
-          const job = jobs.find(j => j.id === role.job_id);
-          firstRow.roleStarts.push({
-            position: 0.95,
-            role: { ...role, job },
-            tag: 'Currently',
-            stackOffset: currentlyIdx,
-          });
-          currentlyIdx++;
-        }
+      const unshownCurrentRoles = currentRoles.filter(
+        r => !firstRow.roleStarts.some(rs => rs.role.id === r.id)
+      );
+      if (unshownCurrentRoles.length > 0) {
+        const currentJobs = unshownCurrentRoles.map(r => {
+          const job = jobs.find(j => j.id === r.job_id);
+          return { role: r, job };
+        });
+        firstRow.roleStarts.push({
+          position: 0.95,
+          role: { ...unshownCurrentRoles[0], job: currentJobs[0].job },
+          tag: 'Currently',
+          currentJobs,
+        });
       }
     }
 
@@ -409,14 +410,22 @@
 
             <!-- ═══ ROLE MARKERS ═══ -->
             {#each row.roleStarts as rs}
-              <button class="tl-role-marker" style="left: {rs.position * 100}%;{rs.stackOffset ? ` margin-top: -${rs.stackOffset * 52}px;` : ''}"
+              <button class="tl-role-marker" style="left: {rs.position * 100}%;"
                 on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
                 on:mouseenter={() => onRoleProximity(rs.role)}
                 title={rs.role.name}>
                 {#if rs.tag}
                   <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'} class:currently={rs.tag === 'Currently'}>{rs.tag}</span>
                 {/if}
-                <span class="tl-role-name">{rs.role.name}</span>
+                {#if rs.currentJobs}
+                  <span class="tl-currently-jobs">
+                    {#each rs.currentJobs as cj}
+                      <span class="tl-currently-job-name">{cj.job?.name || cj.role.name}</span>
+                    {/each}
+                  </span>
+                {:else}
+                  <span class="tl-role-name">{rs.role.name}</span>
+                {/if}
                 <span class="tl-role-icon">◆</span>
               </button>
             {/each}
@@ -686,7 +695,28 @@
     transition: color 0.15s;
   }
 
-  .tl-role-marker:hover .tl-role-name { color: #e0e2e8; border-bottom-color: #6b6e7a; }
+  .tl-currently-jobs {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    white-space: nowrap;
+  }
+
+  .tl-currently-job-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b6e7a;
+    transition: color 0.15s;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #3a3d48;
+    line-height: 1.3;
+  }
+
+  .tl-role-marker:hover .tl-role-name,
+  .tl-role-marker:hover .tl-currently-job-name { color: #e0e2e8; border-bottom-color: #6b6e7a; }
   .tl-role-marker:hover .tl-role-icon { color: #8a8d98; }
 
   /* ── Project dots: base ──────────────────────────── */
