@@ -13,6 +13,7 @@
   let selectedProject = null;
   let selectedRole = null;
   let popupStyle = '';
+  let hoveredJobId = null;
 
   // Popup media state
   let popupVideoIndex = 0;
@@ -96,6 +97,12 @@
       return idx === 0 ? 'New role' : 'Promotion';
     }
 
+    // Build a map of role_id → job_id for quick lookup
+    const roleJobMap = {};
+    for (const r of roles) {
+      if (r.job_id) roleJobMap[r.id] = r.job_id;
+    }
+
     // Build a map of job date_start → position (for snapping roles to same position)
     const jobDateMap = {};
     for (const job of jobs) {
@@ -175,6 +182,7 @@
           ...p,
           position: datePos(new Date(p.date_of_creation), pStart, pEnd),
           weightClass: getWeightClass(p.weight),
+          jobId: roleJobMap[p.role_id] || null,
         }))
         .sort((a, b) => a.position - b.position);
 
@@ -237,6 +245,7 @@
         start: (js - pStart.getTime()) / total,
         end: (je - pStart.getTime()) / total,
         color: job.color || '#3a3d48',
+        jobId: job.id,
       };
     });
 
@@ -251,7 +260,7 @@
           stackCount++;
         }
       }
-      segments.push({ start: iv.start, end: iv.end, type: 'solid', color: iv.color, stackIndex, stackCount });
+      segments.push({ start: iv.start, end: iv.end, type: 'solid', color: iv.color, jobId: iv.jobId, stackIndex, stackCount });
     }
 
     const allStarts = jobIntervals.map(iv => iv.start);
@@ -392,14 +401,18 @@
                 <div class="tl-segment tl-seg-dashed"
                   style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%;"></div>
               {:else}
-                <div class="tl-segment tl-seg-solid"
+                <div class="tl-segment tl-seg-solid" class:tl-dimmed={hoveredJobId && seg.jobId !== hoveredJobId}
                   style="left: {seg.start * 100}%; width: {(seg.end - seg.start) * 100}%; background: {seg.color};{seg.stackCount > 1 ? ` height: ${4 / seg.stackCount}px; top: ${(seg.stackIndex * 4) / seg.stackCount}px;` : ''}"></div>
               {/if}
             {/each}
 
             <!-- ═══ JOB START MARKERS (with vertical tick connecting to line) ═══ -->
             {#each row.jobStarts as js}
-              <div class="tl-job-marker" style="left: {js.position * 100}%;">
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="tl-job-marker" class:tl-dimmed={hoveredJobId && js.jobId !== hoveredJobId}
+                style="left: {js.position * 100}%;"
+                on:mouseenter={() => { hoveredJobId = js.jobId; }}
+                on:mouseleave={() => { hoveredJobId = null; }}>
                 <div class="tl-job-tick"></div>
                 <div class="tl-job-info">
                   <span class="tl-job-name">{js.name}</span>
@@ -410,20 +423,23 @@
 
             <!-- ═══ ROLE MARKERS ═══ -->
             {#each row.roleStarts as rs}
-              <button class="tl-role-marker" style="left: {rs.position * 100}%;"
+              <button class="tl-role-marker" class:tl-dimmed={hoveredJobId && (rs.role.job_id || rs.role.job?.id) !== hoveredJobId}
+                style="left: {rs.position * 100}%;"
                 on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
-                on:mouseenter={() => onRoleProximity(rs.role)}
+                on:mouseenter={() => { onRoleProximity(rs.role); if (!rs.currentJobs) hoveredJobId = rs.role.job_id || rs.role.job?.id; }}
+                on:mouseleave={() => { hoveredJobId = null; }}
                 title={rs.role.name}>
-                {#if rs.tag}
-                  <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'} class:currently={rs.tag === 'Currently'}>{rs.tag}</span>
-                {/if}
                 {#if rs.currentJobs}
                   <span class="tl-currently-jobs">
+                    <span class="tl-role-tag currently">{rs.tag}</span>
                     {#each rs.currentJobs as cj}
                       <span class="tl-currently-job-name">{cj.job?.name || cj.role.name}</span>
                     {/each}
                   </span>
                 {:else}
+                  {#if rs.tag}
+                    <span class="tl-role-tag" class:promotion={rs.tag === 'Promotion'} class:currently={rs.tag === 'Currently'}>{rs.tag}</span>
+                  {/if}
                   <span class="tl-role-name">{rs.role.name}</span>
                 {/if}
                 <span class="tl-role-icon">◆</span>
@@ -432,7 +448,7 @@
 
             <!-- ═══ PROJECT DOTS (weight-based) ═══ -->
             {#each row.dots as dot, di}
-              <button class="tl-dot {dot.weightClass}" class:active={selectedProject?.id === dot.id}
+              <button class="tl-dot {dot.weightClass}" class:active={selectedProject?.id === dot.id} class:tl-dimmed={hoveredJobId && dot.jobId !== hoveredJobId}
                 style="left: {dot.position * 100}%;"
                 on:click|stopPropagation={(e) => openProjectPopup(dot, e)}
                 on:mouseenter={() => onRoleProximity(dot.role)}
@@ -699,10 +715,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     position: absolute;
     bottom: calc(100% + 10px);
     white-space: nowrap;
+  }
+
+  .tl-currently-jobs .tl-role-tag {
+    position: static;
+    margin-bottom: 2px;
   }
 
   .tl-currently-job-name {
@@ -718,6 +739,10 @@
   .tl-role-marker:hover .tl-role-name,
   .tl-role-marker:hover .tl-currently-job-name { color: #e0e2e8; border-bottom-color: #6b6e7a; }
   .tl-role-marker:hover .tl-role-icon { color: #8a8d98; }
+
+  /* ── Hover dimming ─────────────────────────────────── */
+  .tl-dimmed { opacity: 0.2; transition: opacity 0.2s; }
+  .tl-seg-solid, .tl-job-marker, .tl-role-marker, .tl-dot { transition: opacity 0.2s; }
 
   /* ── Project dots: base ──────────────────────────── */
   .tl-dot {
