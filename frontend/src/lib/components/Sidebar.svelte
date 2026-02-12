@@ -222,4 +222,7 @@
   .accolade-text {
     font-size: 12.5px;
     color: #c0c3cc;
-    line-hei
+    line-height: 1.5;
+    margin: 0;
+  }
+</style>
