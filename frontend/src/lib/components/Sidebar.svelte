@@ -36,6 +36,14 @@
       prevRoleId = $currentRoleId;
     }
   }
+
+  // Split accolades text into individual cards (one per line)
+  $: accoladeCards = displayRole?.accolades
+    ? displayRole.accolades.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+    : [];
+
+  // Job color for divider, fallback to default
+  $: jobColor = displayJob?.color || '#3a3d48';
 </script>
 
 <aside class="sidebar-public">
@@ -44,7 +52,7 @@
       <h1 class="contact-name">{contact.name}</h1>
     {/if}
     {#if contact.email}
-      <a href="/cdn-cgi/l/email-protection#a9d2cac6c7ddc8cadd87ccc4c8c0c5d4" class="contact-link">{contact.email}</a>
+      <a href="mailto:{contact.email}" class="contact-link">{contact.email}</a>
     {/if}
     {#if contact.linkedin}
       <a href={contact.linkedin} target="_blank" rel="noopener" class="contact-link">LinkedIn ↗</a>
@@ -56,7 +64,16 @@
       class="sidebar-role"
       style="opacity: {roleOpacity}; transform: translateX({roleTranslate}px);"
     >
-      <div class="role-divider"></div>
+      <!-- Colored divider using job color -->
+      <div class="role-divider" style="background: {jobColor};"></div>
+
+      <!-- Job logo -->
+      {#if displayJob?.logo}
+        <div class="role-logo-wrap">
+          <img src={displayJob.logo} alt={displayJob.name} class="role-logo" />
+        </div>
+      {/if}
+
       <h2 class="role-title">{displayRole.name}</h2>
       {#if displayJob}
         <p class="role-company">{displayJob.name}</p>
@@ -77,8 +94,19 @@
           {/each}
         </div>
       {/if}
-      {#if displayRole.accolades}
-        <p class="role-accolades">{displayRole.accolades}</p>
+
+      <!-- Accolades as individual cards -->
+      {#if accoladeCards.length > 0}
+        <div class="accolades-section">
+          <span class="accolades-label">Achievements</span>
+          <div class="accolades-list">
+            {#each accoladeCards as accolade}
+              <div class="accolade-card" style="border-left-color: {jobColor};">
+                <p class="accolade-text">{accolade}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
       {/if}
     </div>
   {/if}
@@ -93,6 +121,11 @@
     overflow-y: auto;
     overflow-x: hidden;
   }
+
+  /* Hide scrollbar but keep scrollable */
+  .sidebar-public::-webkit-scrollbar { width: 0; }
+  .sidebar-public { scrollbar-width: none; }
+
   .sidebar-contact { margin-bottom: 8px; }
   .contact-name {
     font-size: 20px; font-weight: 600; color: #e0e2e8;
@@ -108,16 +141,88 @@
     transition: opacity 0.18s ease, transform 0.18s ease;
     will-change: opacity, transform;
   }
-  .role-divider { width: 24px; height: 1px; background: #2a2d35; margin: 24px 0; }
-  .role-title { font-size: 15px; font-weight: 600; color: #e0e2e8; margin-bottom: 4px; letter-spacing: -0.01em; }
+
+  /* ── Colored divider ────────────────────────── */
+  .role-divider {
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    margin: 24px 0;
+    transition: background 0.3s ease;
+  }
+
+  /* ── Job logo ───────────────────────────────── */
+  .role-logo-wrap {
+    margin-bottom: 14px;
+  }
+
+  .role-logo {
+    max-width: 120px;
+    max-height: 40px;
+    object-fit: contain;
+    display: block;
+    opacity: 0.85;
+    transition: opacity 0.2s;
+  }
+
+  .role-logo:hover { opacity: 1; }
+
+  /* ── Role info ──────────────────────────────── */
+  .role-title {
+    font-size: 15px; font-weight: 600; color: #e0e2e8;
+    margin-bottom: 4px; letter-spacing: -0.01em;
+  }
   .role-company { font-size: 13px; color: #6b6e7a; margin-bottom: 4px; }
   .role-department { font-size: 12px; color: #4e515c; margin-bottom: 4px; }
   .role-dates { font-size: 12px; color: #4e515c; margin-bottom: 12px; }
   .role-description { font-size: 13px; color: #8a8d98; line-height: 1.6; margin-bottom: 12px; }
+
   .role-proficiencies { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
   .proficiency-tag {
     font-size: 11px; color: #6b6e7a; background: #1a1c22;
     padding: 3px 8px; border-radius: 3px; border: 1px solid #2a2d35;
   }
-  .role-accolades { font-size: 12px; color: #6b6e7a; font-style: italic; line-height: 1.5; }
+
+  /* ── Accolades section ──────────────────────── */
+  .accolades-section {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #1e2028;
+  }
+
+  .accolades-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    color: #4e515c;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  .accolades-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .accolade-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid #1e2028;
+    border-left: 3px solid #3a3d48;
+    border-radius: 0 5px 5px 0;
+    padding: 10px 12px;
+    transition: border-left-color 0.3s, background 0.2s;
+  }
+
+  .accolade-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .accolade-text {
+    font-size: 12.5px;
+    color: #c0c3cc;
+    line-height: 1.5;
+    margin: 0;
+  }
 </style>

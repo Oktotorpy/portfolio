@@ -162,43 +162,48 @@
 
       <!-- ═══ REGULAR VIDEOS / YOUTUBE (non-Shorts): below images ═══ -->
       {#if hasRegularVideo}
-        
-          {@const currentMedia = regularVideoMedia[currentVideoIndex]}
-			<div class="video-section">
-          {#if currentMedia.media_type === 'video'}
-            <!-- Uploaded video: click-to-play -->
-            {#if activeVideoId === (currentMedia.id || currentVideoIndex)}
-              <video
-                src={currentMedia.media_value}
-                controls
-                autoplay
-                preload="auto"
-                class="video-player"
-              ></video>
-            {:else}
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="video-poster" on:click={() => playVideo(currentMedia.id || currentVideoIndex)}>
-                <div class="poster-placeholder">
-                  <div class="play-btn">▶</div>
-                  <span class="poster-label">Click to play</span>
+        <div class="video-section">
+          {#each [regularVideoMedia[currentVideoIndex]] as currentMedia (currentVideoIndex)}
+            {#if currentMedia.media_type === 'video'}
+              <!-- Uploaded video: click-to-play with first-frame thumbnail -->
+              {#if activeVideoId === (currentMedia.id || currentVideoIndex)}
+                <video
+                  src={currentMedia.media_value}
+                  controls
+                  autoplay
+                  preload="auto"
+                  class="video-player"
+                ></video>
+              {:else}
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
+                <div class="video-poster" on:click={() => playVideo(currentMedia.id || currentVideoIndex)}>
+                  <video
+                    src={currentMedia.media_value}
+                    preload="metadata"
+                    muted
+                    class="video-player poster-frame"
+                  ></video>
+                  <div class="play-overlay">
+                    <div class="play-btn">▶</div>
+                  </div>
                 </div>
-              </div>
+              {/if}
+            {:else}
+              <!-- YouTube embed (regular, landscape) -->
+              {@const ytId = getYouTubeId(currentMedia.media_value)}
+              {#if ytId}
+                <iframe
+                  src="https://www.youtube-nocookie.com/embed/{ytId}"
+                  title={project.name}
+                  frameborder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowfullscreen
+                  class="yt-landscape"
+                ></iframe>
+              {/if}
             {/if}
-          {:else}
-            <!-- YouTube embed (regular, landscape) -->
-            {@const ytId = getYouTubeId(currentMedia.media_value)}
-            {#if ytId}
-              <iframe
-                src="https://www.youtube-nocookie.com/embed/{ytId}"
-                title={project.name}
-                frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowfullscreen
-                class="yt-landscape"
-              ></iframe>
-            {/if}
-          {/if}
+          {/each}
 
           {#if regularVideoMedia.length > 1}
             <button class="video-nav video-prev" on:click={prevVideo}>‹</button>
@@ -374,56 +379,49 @@
     border: none;
   }
 
-  /* Click-to-play poster */
+  /* Click-to-play: first frame as poster */
   .video-poster {
     position: relative;
     cursor: pointer;
     width: 100%;
   }
 
-  .poster-placeholder {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    background: #111318;
+  .poster-frame {
+    pointer-events: none;
+  }
+
+  .play-overlay {
+    position: absolute;
+    inset: 0;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    background: rgba(0, 0, 0, 0.2);
     transition: background 0.2s;
   }
 
-  .video-poster:hover .poster-placeholder {
-    background: #181b22;
+  .video-poster:hover .play-overlay {
+    background: rgba(0, 0, 0, 0.1);
   }
 
   .play-btn {
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
-    color: #8a8d98;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
     font-size: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
     padding-left: 4px;
-    transition: transform 0.2s, background 0.2s, color 0.2s;
+    transition: transform 0.2s, background 0.2s;
   }
 
   .video-poster:hover .play-btn {
     transform: scale(1.1);
-    background: rgba(255, 255, 255, 0.12);
-    color: #e0e2e8;
+    background: rgba(0, 0, 0, 0.8);
   }
-
-  .poster-label {
-    font-size: 12px;
-    color: #4e515c;
-    transition: color 0.2s;
-  }
-
-  .video-poster:hover .poster-label { color: #6b6e7a; }
 
   /* Video navigation arrows */
   .video-nav {

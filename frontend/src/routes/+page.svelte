@@ -34,6 +34,12 @@
     closePopup();
   }
 
+  // Desktop only: hovering near a role marker previews that role in sidebar
+  function onRoleProximity(role) {
+    if (isMobile) return;
+    if (role?.id) $currentRoleId = role.id;
+  }
+
   $: segMonths = isMobile ? 3 : 12;
   $: rows = buildRows(data.jobs, data.roles, data.projects, segMonths);
 
@@ -262,7 +268,9 @@
 
             {#each row.roleStarts as rs}
               <button class="tl-role-marker" style="left: {rs.position * 100}%;"
-                on:click|stopPropagation={(e) => openRolePopup(rs.role, e)} title={rs.role.name}>
+                on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
+                on:mouseenter={() => onRoleProximity(rs.role)}
+                title={rs.role.name}>
                 <span class="tl-role-name">{rs.role.name}</span>
                 <span class="tl-role-arrow">▲</span>
                 <span class="tl-role-square"></span>
@@ -361,7 +369,7 @@
   .tl-job-name { font-size: 13px; font-weight: 600; color: #8a8d98; }
   .tl-job-country { font-size: 11px; color: #4e515c; margin-top: 1px; }
 
-  .tl-role-marker { position: absolute; top: 0; transform: translate(-50%, 0); z-index: 5; background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; padding: 0; }
+  .tl-role-marker { position: absolute; top: 0; transform: translate(-50%, 0); z-index: 5; background: none; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; padding: 16px 24px; margin: -16px -24px; }
   .tl-role-name { font-size: 12px; font-weight: 600; color: #6b6e7a; white-space: nowrap; position: absolute; bottom: calc(100% + 2px); transition: color 0.15s; }
   .tl-role-arrow { font-size: 7px; color: #4e515c; line-height: 1; position: absolute; bottom: 10px; transition: color 0.15s; }
   .tl-role-square { width: 10px; height: 10px; border: 2px solid #4e515c; border-radius: 2px; background: #111114; display: block; transform: translateY(-4px); transition: all 0.15s; }
