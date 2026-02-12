@@ -280,7 +280,9 @@
             {#each row.dots as dot, di}
               <button class="tl-dot" class:active={selectedProject?.id === dot.id}
                 style="left: {dot.position * 100}%;"
-                on:click|stopPropagation={(e) => openProjectPopup(dot, e)} title={dot.name}>
+                on:click|stopPropagation={(e) => openProjectPopup(dot, e)}
+                on:mouseenter={() => onRoleProximity(dot.role)}
+                title={dot.name}>
                 <span class="tl-dot-circle"></span>
                 <span class="tl-dot-label" class:above={di % 2 === 0} class:below={di % 2 !== 0}>{dot.name}</span>
               </button>
