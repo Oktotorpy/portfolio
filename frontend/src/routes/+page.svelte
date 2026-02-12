@@ -200,8 +200,8 @@
     if (result.length > 0 && roles?.length) {
       const firstRow = result[0];
       const currentRoles = roles.filter(r => !r.date_end && r.date_start);
+      let currentlyIdx = 0;
       for (const role of currentRoles) {
-        // Only add if this role doesn't already have a start marker in the first row
         const alreadyShown = firstRow.roleStarts.some(rs => rs.role.id === role.id);
         if (!alreadyShown) {
           const job = jobs.find(j => j.id === role.job_id);
@@ -209,7 +209,9 @@
             position: 0.95,
             role: { ...role, job },
             tag: 'Currently',
+            stackOffset: currentlyIdx,
           });
+          currentlyIdx++;
         }
       }
     }
@@ -302,14 +304,27 @@
     const viewH = window.innerHeight;
     const popupW = Math.min(360, viewW - 32);
 
-    let left = rect.left + rect.width / 2;
-    left = Math.max(popupW / 2 + 16, Math.min(viewW - popupW / 2 - 16, left));
-
-    let top = rect.top - 12;
-    if (top < 320) {
-      popupStyle = `top: ${rect.bottom + 12}px; left: ${left}px; transform: translateX(-50%); max-width: ${popupW}px;`;
+    if (isMobile) {
+      // Mobile: fixed at bottom center
+      popupStyle = `position: fixed; bottom: 68px; left: 50%; transform: translateX(-50%); max-width: ${popupW}px;`;
     } else {
-      popupStyle = `bottom: ${viewH - top}px; left: ${left}px; transform: translateX(-50%); max-width: ${popupW}px;`;
+      // Desktop: absolute, scrolls with page
+      const scrollY = window.scrollY || window.pageYOffset;
+      const scrollX = window.scrollX || window.pageXOffset;
+      const pageX = rect.left + rect.width / 2 + scrollX;
+      const pageY = rect.top + scrollY;
+
+      let left = pageX;
+      left = Math.max(popupW / 2 + 16, Math.min(viewW + scrollX - popupW / 2 - 16, left));
+
+      const viewTop = rect.top;
+      if (viewTop < 320) {
+        const top = pageY + rect.height + 12;
+        popupStyle = `position: absolute; top: ${top}px; left: ${left}px; transform: translateX(-50%); max-width: ${popupW}px;`;
+      } else {
+        const top = pageY - 12;
+        popupStyle = `position: absolute; top: ${top}px; left: ${left}px; transform: translate(-50%, -100%); max-width: ${popupW}px;`;
+      }
     }
   }
 
@@ -394,7 +409,7 @@
 
             <!-- ═══ ROLE MARKERS ═══ -->
             {#each row.roleStarts as rs}
-              <button class="tl-role-marker" style="left: {rs.position * 100}%;"
+              <button class="tl-role-marker" style="left: {rs.position * 100}%;{rs.stackOffset ? ` margin-top: -${rs.stackOffset * 52}px;` : ''}"
                 on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
                 on:mouseenter={() => onRoleProximity(rs.role)}
                 title={rs.role.name}>
@@ -783,7 +798,7 @@
   /* ── Popups ──────────────────────────────────────── */
   .popup-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.35); }
   .popup-card {
-    position: fixed; z-index: 91; background: #1a1c22;
+    z-index: 91; background: #1a1c22;
     border: 1px solid #2a2d35; border-radius: 10px;
     overflow: hidden; overflow-y: auto;
     width: 360px; max-height: 80vh;
@@ -856,6 +871,6 @@
     .tl-job-country { font-size: 9px; }
     .tl-role-name { font-size: 10px; }
     .tl-role-tag { font-size: 8px; }
-    .popup-card { width: calc(100vw - 32px); max-width: 360px; left: 50% !important; transform: translateX(-50%) !important; top: auto !important; bottom: 68px !important; }
+    .popup-card { width: calc(100vw - 32px); max-width: 360px; }
   }
 </style>
