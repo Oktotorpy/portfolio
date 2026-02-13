@@ -643,8 +643,8 @@
     margin-top: 6px;
     white-space: nowrap;
   }
-  .tl-job-name { font-size: 13px; font-weight: 600; color: #8a8d98; }
-  .tl-job-country { font-size: 11px; color: #4e515c; margin-top: 1px; }
+  .tl-job-name { font-size: 13px; font-weight: 600; color: #e0e2e8; }
+  .tl-job-country { font-size: 11px; color: #b9bbc0; margin-top: 1px; }
 
   /* ── Role markers ────────────────────────────────── */
   .tl-role-marker {
@@ -689,7 +689,7 @@
   .tl-role-name {
     font-size: 12px;
     font-weight: 600;
-    color: #6b6e7a;
+    color: #e0e2e8;
     white-space: nowrap;
     position: absolute;
     bottom: calc(100% + 10px);
