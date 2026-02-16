@@ -104,9 +104,9 @@
 <style>
   .public-layout {
     font-family: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    color: #e0e2e8;
+    color: var(--text);
     min-height: 100vh;
-    background: #111114;
+    background: var(--bg-page);
   }
 
   .layout-container {
@@ -128,11 +128,11 @@
   .main-nav {
     display: flex;
     gap: 0;
-    border-bottom: 1px solid #1e2028;
+    border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 32px;
     position: sticky;
     top: 0;
-    background: #111114;
+    background: var(--bg-page);
     z-index: 10;
     padding-top: 4px;
   }
@@ -141,18 +141,18 @@
     padding: 12px 16px;
     font-size: 14px;
     font-weight: 500;
-    color: #4e515c;
+    color: var(--text-muted);
     text-decoration: none;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
     white-space: nowrap;
   }
 
-  .nav-link:hover { color: #8a8d98; }
+  .nav-link:hover { color: var(--text-dim); }
 
   .nav-link.active {
-    color: #e0e2e8;
-    border-bottom-color: #e0e2e8;
+    color: var(--text);
+    border-bottom-color: var(--text);
   }
 
   .main-content-public { padding-bottom: 80px; }
@@ -187,16 +187,16 @@
       padding: 12px 16px;
       position: fixed;
       top: 0; left: 0; right: 0;
-      background: #111114;
-      border-bottom: 1px solid #1e2028;
+      background: var(--bg-page);
+      border-bottom: 1px solid var(--border-subtle);
       z-index: 50;
     }
 
-    .mh-name { font-size: 13px; font-weight: 600; color: #e0e2e8; display: block; }
-    .mh-email { font-size: 11px; color: #4e515c; text-decoration: none; }
+    .mh-name { font-size: 13px; font-weight: 600; color: var(--text); display: block; }
+    .mh-email { font-size: 11px; color: var(--text-muted); text-decoration: none; }
     .mobile-header-right { text-align: right; }
-    .mh-role { font-size: 12px; font-weight: 500; color: #8a8d98; display: block; }
-    .mh-company { font-size: 11px; color: #4e515c; display: block; }
+    .mh-role { font-size: 12px; font-weight: 500; color: var(--text-dim); display: block; }
+    .mh-company { font-size: 11px; color: var(--text-muted); display: block; }
 
     .mobile-nav {
       display: flex;
@@ -204,18 +204,18 @@
       justify-content: space-between;
       position: fixed;
       bottom: 0; left: 0; right: 0;
-      background: #16181e;
-      border-top: 1px solid #1e2028;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-subtle);
       padding: 0 16px;
       height: 52px;
       z-index: 50;
     }
 
     .mobile-nav-link {
-      font-size: 14px; font-weight: 500; color: #4e515c;
+      font-size: 14px; font-weight: 500; color: var(--text-muted);
       text-decoration: none; padding: 14px 0;
     }
-    .mobile-nav-link.active { color: #e0e2e8; }
+    .mobile-nav-link.active { color: var(--text); }
 
     .mobile-nav-burger-wrap { position: relative; }
 
@@ -229,7 +229,7 @@
 
     .mobile-nav-burger span {
       display: block; width: 20px; height: 1.5px;
-      background: #6b6e7a; border-radius: 1px; transition: all 0.2s;
+      background: var(--text-faint); border-radius: 1px; transition: all 0.2s;
     }
 
     .mobile-nav-burger.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
@@ -241,8 +241,8 @@
     .mobile-dropdown {
       position: absolute;
       bottom: 48px; right: 0;
-      background: #1a1c22;
-      border: 1px solid #2a2d35;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 8px 0;
       min-width: 180px;
@@ -251,14 +251,14 @@
 
     .mobile-dropdown-link {
       display: block; padding: 10px 16px;
-      font-size: 14px; color: #6b6e7a;
+      font-size: 14px; color: var(--text-faint);
       text-decoration: none; transition: all 0.15s;
     }
 
     .mobile-dropdown-link:hover,
     .mobile-dropdown-link.active {
-      color: #e0e2e8;
-      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      background: var(--highlight);
     }
 
     .main-content-public { padding-bottom: 16px; }

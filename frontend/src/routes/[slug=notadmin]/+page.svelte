@@ -107,5 +107,5 @@
 
 <style>
   .project-list { display: flex; flex-direction: column; gap: 16px; }
-  .empty-state { display: flex; align-items: center; justify-content: center; padding: 120px 0; color: #2a2d35; font-size: 16px; }
+  .empty-state { display: flex; align-items: center; justify-content: center; padding: 120px 0; color: var(--text-ghost); font-size: 16px; }
 </style>
