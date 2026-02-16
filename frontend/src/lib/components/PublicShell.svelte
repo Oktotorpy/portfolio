@@ -1,5 +1,6 @@
 <script>
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { currentRoleId } from '$lib/stores.js';
   import { slugify } from '$lib/utils.js';
   import Sidebar from '$lib/components/Sidebar.svelte';
@@ -9,6 +10,8 @@
   export let workTypes = [];
 
   let mobileMenuOpen = false;
+  let touchStartX = 0;
+  let touchStartY = 0;
 
   $: navItems = workTypes.map(wt => ({
     name: wt.name,
@@ -17,15 +20,43 @@
   }));
   $: currentPath = $page.url.pathname;
 
+  // Full ordered list of pages for swipe navigation
+  $: allPages = [{ name: 'Timeline', href: '/' }, ...navItems];
+
   $: activeRole = roles.find(r => r.id === $currentRoleId) || null;
   $: activeJob = activeRole?.job || null;
 
   function closeMobileMenu() {
     mobileMenuOpen = false;
   }
+
+  function handleTouchStart(e) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+
+  function handleTouchEnd(e) {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    // Only trigger if horizontal swipe is dominant and exceeds threshold
+    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.7) return;
+
+    const currentIndex = allPages.findIndex(p => p.href === currentPath);
+    if (currentIndex === -1) return;
+
+    if (dx < 0 && currentIndex < allPages.length - 1) {
+      // Swipe left → next page
+      goto(allPages[currentIndex + 1].href);
+    } else if (dx > 0 && currentIndex > 0) {
+      // Swipe right → previous page
+      goto(allPages[currentIndex - 1].href);
+    }
+  }
 </script>
 
-<div class="public-layout">
+<div class="public-layout"
+  on:touchstart={handleTouchStart}
+  on:touchend={handleTouchEnd}>
   <!-- MOBILE HEADER -->
   <header class="mobile-header">
     <div class="mobile-header-left">
@@ -107,6 +138,8 @@
     color: var(--text);
     min-height: 100vh;
     background: var(--bg-page);
+    overflow-x: hidden;
+    position: relative;
   }
 
   .layout-container {

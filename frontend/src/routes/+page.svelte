@@ -433,7 +433,7 @@
                   <span class="tl-currently-jobs">
                     <span class="tl-role-tag currently">{rs.tag}</span>
                     {#each rs.currentJobs as cj}
-                      <span class="tl-currently-job-name">{cj.job?.name || cj.role.name}</span>
+                      <span class="tl-currently-job-name">{cj.role.name}</span>
                     {/each}
                   </span>
                 {:else}
@@ -919,7 +919,8 @@
 
   /* ── Mobile ──────────────────────────────────────── */
   @media (max-width: 768px) {
-    .tl-row { padding: 36px 0; }
+    .timeline { overflow: hidden; }
+    .tl-row { padding: 36px 0; overflow: hidden; }
     .tl-label { width: 52px; font-size: 12px; }
     .tl-dot-label { font-size: 10px; max-width: 90px; }
     .tl-job-name { font-size: 11px; }
