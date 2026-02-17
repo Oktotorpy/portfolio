@@ -51,12 +51,17 @@
     {#if contact.name}
       <h1 class="contact-name">{contact.name}</h1>
     {/if}
+    {#if contact.description}
+      <p class="contact-description">{contact.description}</p>
+    {/if}
     {#if contact.email}
       <a href="mailto:{contact.email}" class="contact-link">{contact.email}</a>
     {/if}
     {#if contact.linkedin}
       <a href={contact.linkedin} target="_blank" rel="noopener" class="contact-link">LinkedIn ↗</a>
     {/if}
+    <a href="https://vitz.pro" target="_blank" rel="noopener" class="contact-link">vitz.pro ↗</a>
+    <a href="/cv" class="contact-link">CV ↗</a>
   </div>
 
   {#if displayRole}
@@ -131,6 +136,10 @@
   .contact-name {
     font-size: 20px; font-weight: 600; color: var(--text);
     margin-bottom: 10px; letter-spacing: -0.02em;
+  }
+  .contact-description {
+    font-size: 13px; color: var(--text-dim); line-height: 1.5;
+    margin-bottom: 10px;
   }
   .contact-link {
     display: block; font-size: 13px; color: var(--text-faint);

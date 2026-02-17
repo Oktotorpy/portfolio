@@ -7,10 +7,11 @@ CREATE TABLE IF NOT EXISTS contact (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     name TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
-    linkedin TEXT NOT NULL DEFAULT ''
+    linkedin TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT ''
 );
 
-INSERT INTO contact (id, name, email, linkedin) VALUES (1, '', '', '');
+INSERT INTO contact (id, name, email, linkedin, description) VALUES (1, '', '', '', '');
 
 -- Lookup tables
 CREATE TABLE IF NOT EXISTS countries (

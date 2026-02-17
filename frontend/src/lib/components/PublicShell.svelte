@@ -89,6 +89,7 @@
         {#each navItems as item}
           <a href={item.href} class="nav-link" class:active={currentPath === item.href}>{item.name}</a>
         {/each}
+        <a href="/cv" class="nav-link" class:active={currentPath === '/cv'}>CV</a>
       </nav>
 
       <div class="main-content-public">
@@ -100,6 +101,7 @@
   <!-- MOBILE BOTTOM NAV -->
   <nav class="mobile-nav">
     <a href="/" class="mobile-nav-link" class:active={currentPath === '/'}>Timeline</a>
+    <a href="/cv" class="mobile-nav-link" class:active={currentPath === '/cv'}>CV</a>
 
     <div class="mobile-nav-burger-wrap">
       <button
