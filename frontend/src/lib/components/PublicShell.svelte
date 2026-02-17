@@ -89,7 +89,7 @@
         {#each navItems as item}
           <a href={item.href} class="nav-link" class:active={currentPath === item.href}>{item.name}</a>
         {/each}
-        <a href="/cv" class="nav-link" class:active={currentPath === '/cv'}>CV</a>
+        <a href="/cv" class="nav-cv-btn">CV</a>
       </nav>
 
       <div class="main-content-public">
@@ -101,7 +101,7 @@
   <!-- MOBILE BOTTOM NAV -->
   <nav class="mobile-nav">
     <a href="/" class="mobile-nav-link" class:active={currentPath === '/'}>Timeline</a>
-    <a href="/cv" class="mobile-nav-link" class:active={currentPath === '/cv'}>CV</a>
+    <a href="/cv" class="mobile-cv-btn">CV</a>
 
     <div class="mobile-nav-burger-wrap">
       <button
@@ -189,6 +189,27 @@
     border-bottom-color: var(--text);
   }
 
+  .nav-cv-btn {
+    margin-left: auto;
+    align-self: center;
+    padding: 5px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: all 0.15s;
+  }
+
+  .nav-cv-btn:hover {
+    border-color: var(--text-faint);
+    background: var(--bg-elevated);
+  }
+
   .main-content-public { padding-bottom: 80px; }
 
   .mobile-header { display: none; }
@@ -250,6 +271,24 @@
       text-decoration: none; padding: 14px 0;
     }
     .mobile-nav-link.active { color: var(--text); }
+
+    .mobile-cv-btn {
+      padding: 6px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      transition: all 0.15s;
+    }
+
+    .mobile-cv-btn:hover {
+      border-color: var(--text-faint);
+    }
 
     .mobile-nav-burger-wrap { position: relative; }
 

@@ -61,7 +61,7 @@
       <a href={contact.linkedin} target="_blank" rel="noopener" class="contact-link">LinkedIn ↗</a>
     {/if}
     <a href="https://vitz.pro" target="_blank" rel="noopener" class="contact-link">vitz.pro ↗</a>
-    <a href="/cv" class="contact-link">CV ↗</a>
+    <a href="/cv" class="cv-button">CV ↗</a>
   </div>
 
   {#if displayRole}
@@ -146,6 +146,28 @@
     text-decoration: none; margin-bottom: 4px; transition: color 0.2s;
   }
   .contact-link:hover { color: var(--text-dim); }
+
+  .cv-button {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 7px 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: all 0.15s;
+  }
+
+  .cv-button:hover {
+    background: var(--bg-elevated);
+    border-color: var(--text-faint);
+    color: var(--text);
+  }
 
   .sidebar-role {
     transition: opacity 0.18s ease, transform 0.18s ease;
