@@ -36,9 +36,10 @@
 
   async function copyLink() {
     const s = slug || (project.work_types?.[0] ? slugify(project.work_types[0].name) : '');
+    const anchor = slugify(project.name);
     const url = s
-      ? `${window.location.origin}/${s}#project-${project.id}`
-      : `${window.location.origin}/#project-${project.id}`;
+      ? `${window.location.origin}/${s}#${anchor}`
+      : `${window.location.origin}/#${anchor}`;
     try {
       await navigator.clipboard.writeText(url);
       copied = true;
@@ -123,7 +124,7 @@
 <article
   class="project-card"
   class:no-media={!hasMedia}
-  id="project-{project.id}"
+  id={slugify(project.name)}
   data-role-id={project.role_id}
 >
   {#if hasMedia}

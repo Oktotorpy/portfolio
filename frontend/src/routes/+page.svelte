@@ -359,20 +359,37 @@
     if (observer) observer.disconnect();
     if (!timelineEl) return;
 
-    observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter(e => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible.length > 0) {
-          const rid = parseInt(visible[0].target.dataset.primaryRoleId);
-          if (rid && !isNaN(rid)) $currentRoleId = rid;
-        }
-      },
-      { rootMargin: '-20% 0px -60% 0px', threshold: 0 }
-    );
-
-    const rowEls = timelineEl.querySelectorAll('.tl-row');
-    rowEls.forEach(el => observer.observe(el));
+    if (isMobile) {
+      // On mobile, observe role markers to show the top-most role in the header
+      observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries.filter(e => e.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible.length > 0) {
+            const rid = parseInt(visible[0].target.dataset.roleId);
+            if (rid && !isNaN(rid)) $currentRoleId = rid;
+          }
+        },
+        { rootMargin: '-10% 0px -60% 0px', threshold: 0 }
+      );
+      const markers = timelineEl.querySelectorAll('.tl-role-marker[data-role-id]');
+      markers.forEach(el => observer.observe(el));
+    } else {
+      // On desktop, observe rows to update sidebar based on visible time period
+      observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries.filter(e => e.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible.length > 0) {
+            const rid = parseInt(visible[0].target.dataset.primaryRoleId);
+            if (rid && !isNaN(rid)) $currentRoleId = rid;
+          }
+        },
+        { rootMargin: '-20% 0px -60% 0px', threshold: 0 }
+      );
+      const rowEls = timelineEl.querySelectorAll('.tl-row');
+      rowEls.forEach(el => observer.observe(el));
+    }
   }
 
   $: if (rows.length && timelineEl) {
@@ -424,7 +441,7 @@
             <!-- ═══ ROLE MARKERS ═══ -->
             {#each row.roleStarts as rs}
               <button class="tl-role-marker" class:tl-dimmed={hoveredJobId && (rs.role.job_id || rs.role.job?.id) !== hoveredJobId}
-                style="left: {rs.position * 100}%;"
+                style="left: {rs.position * 100}%;" data-role-id={rs.role.id}
                 on:click|stopPropagation={(e) => openRolePopup(rs.role, e)}
                 on:mouseenter={() => { onRoleProximity(rs.role); if (!rs.currentJobs) hoveredJobId = rs.role.job_id || rs.role.job?.id; }}
                 on:mouseleave={() => { hoveredJobId = null; }}
