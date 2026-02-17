@@ -138,8 +138,7 @@
     color: var(--text);
     min-height: 100vh;
     background: var(--bg-page);
-    overflow-x: hidden;
-    position: relative;
+    overflow-x: clip;
   }
 
   .layout-container {

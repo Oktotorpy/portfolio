@@ -115,9 +115,10 @@
 <style>
   .sidebar-public {
     position: sticky;
-    top: 48px;
+    top: 0;
+    padding-top: 48px;
     padding-right: 40px;
-    max-height: calc(100vh - 96px);
+    max-height: 100vh;
     overflow-y: auto;
     overflow-x: hidden;
   }
