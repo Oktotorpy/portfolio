@@ -1,5 +1,6 @@
 <script>
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { currentRoleId } from '$lib/stores.js';
   import { slugify } from '$lib/utils.js';
   import Sidebar from '$lib/components/Sidebar.svelte';
@@ -9,6 +10,8 @@
   export let workTypes = [];
 
   let mobileMenuOpen = false;
+  let touchStartX = 0;
+  let touchStartY = 0;
 
   $: navItems = workTypes.map(wt => ({
     name: wt.name,
@@ -17,15 +20,43 @@
   }));
   $: currentPath = $page.url.pathname;
 
+  // Full ordered list of pages for swipe navigation
+  $: allPages = [{ name: 'Timeline', href: '/' }, ...navItems];
+
   $: activeRole = roles.find(r => r.id === $currentRoleId) || null;
   $: activeJob = activeRole?.job || null;
 
   function closeMobileMenu() {
     mobileMenuOpen = false;
   }
+
+  function handleTouchStart(e) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+
+  function handleTouchEnd(e) {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    // Only trigger if horizontal swipe is dominant and exceeds threshold
+    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.7) return;
+
+    const currentIndex = allPages.findIndex(p => p.href === currentPath);
+    if (currentIndex === -1) return;
+
+    if (dx < 0 && currentIndex < allPages.length - 1) {
+      // Swipe left → next page
+      goto(allPages[currentIndex + 1].href);
+    } else if (dx > 0 && currentIndex > 0) {
+      // Swipe right → previous page
+      goto(allPages[currentIndex - 1].href);
+    }
+  }
 </script>
 
-<div class="public-layout">
+<div class="public-layout"
+  on:touchstart={handleTouchStart}
+  on:touchend={handleTouchEnd}>
   <!-- MOBILE HEADER -->
   <header class="mobile-header">
     <div class="mobile-header-left">
@@ -58,6 +89,7 @@
         {#each navItems as item}
           <a href={item.href} class="nav-link" class:active={currentPath === item.href}>{item.name}</a>
         {/each}
+        <a href="/cv" class="nav-cv-btn">CV</a>
       </nav>
 
       <div class="main-content-public">
@@ -69,6 +101,7 @@
   <!-- MOBILE BOTTOM NAV -->
   <nav class="mobile-nav">
     <a href="/" class="mobile-nav-link" class:active={currentPath === '/'}>Timeline</a>
+    <a href="/cv" class="mobile-cv-btn">CV</a>
 
     <div class="mobile-nav-burger-wrap">
       <button
@@ -104,9 +137,10 @@
 <style>
   .public-layout {
     font-family: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    color: #e0e2e8;
+    color: var(--text);
     min-height: 100vh;
-    background: #111114;
+    background: var(--bg-page);
+    overflow-x: clip;
   }
 
   .layout-container {
@@ -128,11 +162,11 @@
   .main-nav {
     display: flex;
     gap: 0;
-    border-bottom: 1px solid #1e2028;
+    border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 32px;
     position: sticky;
     top: 0;
-    background: #111114;
+    background: var(--bg-page);
     z-index: 10;
     padding-top: 4px;
   }
@@ -141,18 +175,39 @@
     padding: 12px 16px;
     font-size: 14px;
     font-weight: 500;
-    color: #4e515c;
+    color: var(--text-muted);
     text-decoration: none;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
     white-space: nowrap;
   }
 
-  .nav-link:hover { color: #8a8d98; }
+  .nav-link:hover { color: var(--text-dim); }
 
   .nav-link.active {
-    color: #e0e2e8;
-    border-bottom-color: #e0e2e8;
+    color: var(--text);
+    border-bottom-color: var(--text);
+  }
+
+  .nav-cv-btn {
+    margin-left: auto;
+    align-self: center;
+    padding: 5px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: all 0.15s;
+  }
+
+  .nav-cv-btn:hover {
+    border-color: var(--text-faint);
+    background: var(--bg-elevated);
   }
 
   .main-content-public { padding-bottom: 80px; }
@@ -187,16 +242,16 @@
       padding: 12px 16px;
       position: fixed;
       top: 0; left: 0; right: 0;
-      background: #111114;
-      border-bottom: 1px solid #1e2028;
+      background: var(--bg-page);
+      border-bottom: 1px solid var(--border-subtle);
       z-index: 50;
     }
 
-    .mh-name { font-size: 13px; font-weight: 600; color: #e0e2e8; display: block; }
-    .mh-email { font-size: 11px; color: #4e515c; text-decoration: none; }
+    .mh-name { font-size: 13px; font-weight: 600; color: var(--text); display: block; }
+    .mh-email { font-size: 11px; color: var(--text-muted); text-decoration: none; }
     .mobile-header-right { text-align: right; }
-    .mh-role { font-size: 12px; font-weight: 500; color: #8a8d98; display: block; }
-    .mh-company { font-size: 11px; color: #4e515c; display: block; }
+    .mh-role { font-size: 12px; font-weight: 500; color: var(--text-dim); display: block; }
+    .mh-company { font-size: 11px; color: var(--text-muted); display: block; }
 
     .mobile-nav {
       display: flex;
@@ -204,18 +259,36 @@
       justify-content: space-between;
       position: fixed;
       bottom: 0; left: 0; right: 0;
-      background: #16181e;
-      border-top: 1px solid #1e2028;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-subtle);
       padding: 0 16px;
       height: 52px;
       z-index: 50;
     }
 
     .mobile-nav-link {
-      font-size: 14px; font-weight: 500; color: #4e515c;
+      font-size: 14px; font-weight: 500; color: var(--text-muted);
       text-decoration: none; padding: 14px 0;
     }
-    .mobile-nav-link.active { color: #e0e2e8; }
+    .mobile-nav-link.active { color: var(--text); }
+
+    .mobile-cv-btn {
+      padding: 6px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      transition: all 0.15s;
+    }
+
+    .mobile-cv-btn:hover {
+      border-color: var(--text-faint);
+    }
 
     .mobile-nav-burger-wrap { position: relative; }
 
@@ -229,7 +302,7 @@
 
     .mobile-nav-burger span {
       display: block; width: 20px; height: 1.5px;
-      background: #6b6e7a; border-radius: 1px; transition: all 0.2s;
+      background: var(--text-faint); border-radius: 1px; transition: all 0.2s;
     }
 
     .mobile-nav-burger.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
@@ -241,8 +314,8 @@
     .mobile-dropdown {
       position: absolute;
       bottom: 48px; right: 0;
-      background: #1a1c22;
-      border: 1px solid #2a2d35;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 8px 0;
       min-width: 180px;
@@ -251,14 +324,14 @@
 
     .mobile-dropdown-link {
       display: block; padding: 10px 16px;
-      font-size: 14px; color: #6b6e7a;
+      font-size: 14px; color: var(--text-faint);
       text-decoration: none; transition: all 0.15s;
     }
 
     .mobile-dropdown-link:hover,
     .mobile-dropdown-link.active {
-      color: #e0e2e8;
-      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      background: var(--highlight);
     }
 
     .main-content-public { padding-bottom: 16px; }

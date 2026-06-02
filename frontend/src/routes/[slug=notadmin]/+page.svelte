@@ -30,7 +30,7 @@
 
   onMount(async () => {
     setupObserver();
-    // Scroll to anchor if URL has #project-<id>
+    // Scroll to anchor if URL has #project-name
     await tick();
     scrollToAnchor();
   });
@@ -99,7 +99,10 @@
   {:else}
     <div class="project-list" bind:this={cardContainer}>
       {#each projects as project (project.id)}
-        <ProjectCard {project} {slug} />
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div on:mouseenter={() => { if (project.role_id) $currentRoleId = project.role_id; }}>
+          <ProjectCard {project} {slug} />
+        </div>
       {/each}
     </div>
   {/if}
@@ -107,5 +110,5 @@
 
 <style>
   .project-list { display: flex; flex-direction: column; gap: 16px; }
-  .empty-state { display: flex; align-items: center; justify-content: center; padding: 120px 0; color: #2a2d35; font-size: 16px; }
+  .empty-state { display: flex; align-items: center; justify-content: center; padding: 120px 0; color: var(--text-ghost); font-size: 16px; }
 </style>

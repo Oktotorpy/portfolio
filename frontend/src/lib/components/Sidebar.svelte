@@ -51,12 +51,17 @@
     {#if contact.name}
       <h1 class="contact-name">{contact.name}</h1>
     {/if}
+    {#if contact.description}
+      <p class="contact-description">{contact.description}</p>
+    {/if}
     {#if contact.email}
-      <a href="/cdn-cgi/l/email-protection#8ef5ede1e0faefedfaa0ebe3efe7e2f3" class="contact-link">{contact.email}</a>
+      <a href="mailto:{contact.email}" class="contact-link">{contact.email}</a>
     {/if}
     {#if contact.linkedin}
       <a href={contact.linkedin} target="_blank" rel="noopener" class="contact-link">LinkedIn ↗</a>
     {/if}
+    <a href="https://vitz.pro" target="_blank" rel="noopener" class="contact-link">vitz.pro ↗</a>
+    <a href="/cv" class="cv-button">CV ↗</a>
   </div>
 
   {#if displayRole}
@@ -115,9 +120,10 @@
 <style>
   .sidebar-public {
     position: sticky;
-    top: 48px;
+    top: 0;
+    padding-top: 48px;
     padding-right: 40px;
-    max-height: calc(100vh - 96px);
+    max-height: 100vh;
     overflow-y: auto;
     overflow-x: hidden;
   }
@@ -128,14 +134,40 @@
 
   .sidebar-contact { margin-bottom: 8px; }
   .contact-name {
-    font-size: 20px; font-weight: 600; color: #e0e2e8;
+    font-size: 20px; font-weight: 600; color: var(--text);
     margin-bottom: 10px; letter-spacing: -0.02em;
   }
+  .contact-description {
+    font-size: 13px; color: var(--text-dim); line-height: 1.5;
+    margin-bottom: 10px;
+  }
   .contact-link {
-    display: block; font-size: 13px; color: #6b6e7a;
+    display: block; font-size: 13px; color: var(--text-faint);
     text-decoration: none; margin-bottom: 4px; transition: color 0.2s;
   }
-  .contact-link:hover { color: #a0a3ae; }
+  .contact-link:hover { color: var(--text-dim); }
+
+  .cv-button {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 7px 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: all 0.15s;
+  }
+
+  .cv-button:hover {
+    background: var(--bg-elevated);
+    border-color: var(--text-faint);
+    color: var(--text);
+  }
 
   .sidebar-role {
     transition: opacity 0.18s ease, transform 0.18s ease;
@@ -169,32 +201,32 @@
 
   /* ── Role info ──────────────────────────────── */
   .role-title {
-    font-size: 15px; font-weight: 600; color: #e0e2e8;
+    font-size: 15px; font-weight: 600; color: var(--text);
     margin-bottom: 4px; letter-spacing: -0.01em;
   }
-  .role-company { font-size: 13px; color: #6b6e7a; margin-bottom: 4px; }
-  .role-department { font-size: 12px; color: #4e515c; margin-bottom: 4px; }
-  .role-dates { font-size: 12px; color: #4e515c; margin-bottom: 12px; }
-  .role-description { font-size: 13px; color: #8a8d98; line-height: 1.6; margin-bottom: 12px; }
+  .role-company { font-size: 13px; color: var(--text-faint); margin-bottom: 4px; }
+  .role-department { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .role-dates { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+  .role-description { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 12px; }
 
   .role-proficiencies { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
   .proficiency-tag {
-    font-size: 11px; color: #6b6e7a; background: #1a1c22;
-    padding: 3px 8px; border-radius: 3px; border: 1px solid #2a2d35;
+    font-size: 11px; color: var(--text-faint); background: var(--bg-surface);
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border);
   }
 
   /* ── Accolades section ──────────────────────── */
   .accolades-section {
     margin-top: 16px;
     padding-top: 14px;
-    border-top: 1px solid #1e2028;
+    border-top: 1px solid var(--border-subtle);
   }
 
   .accolades-label {
     display: block;
     font-size: 10px;
     font-weight: 600;
-    color: #4e515c;
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     margin-bottom: 10px;
@@ -207,21 +239,21 @@
   }
 
   .accolade-card {
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid #1e2028;
-    border-left: 3px solid #3a3d48;
+    background: var(--highlight);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--border-strong);
     border-radius: 0 5px 5px 0;
     padding: 10px 12px;
     transition: border-left-color 0.3s, background 0.2s;
   }
 
   .accolade-card:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--highlight-hover);
   }
 
   .accolade-text {
     font-size: 12.5px;
-    color: #c0c3cc;
+    color: var(--text-secondary);
     line-height: 1.5;
     margin: 0;
   }

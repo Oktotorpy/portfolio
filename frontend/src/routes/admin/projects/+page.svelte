@@ -14,7 +14,9 @@
   let message = '';
   let messageType = '';
   let saving = false;
+  let filterJobId = '';
   let filterRoleId = '';
+  let filterWorkTypeId = '';
 
   // Form fields
   let formName = '';
@@ -135,10 +137,36 @@
 
   $: if (filterRoleId !== undefined) loadProjects();
 
+  // When job filter changes, reset role filter to match
+  $: if (filterJobId !== undefined) {
+    const jobId = filterJobId ? parseInt(filterJobId) : null;
+    if (jobId && filterRoleId) {
+      const role = roles.find(r => r.id === parseInt(filterRoleId));
+      if (role && role.job_id !== jobId) filterRoleId = '';
+    }
+  }
+
   $: rolesByJob = jobs.map(j => ({
     job: j,
     roles: roles.filter(r => r.job_id === j.id)
   })).filter(g => g.roles.length > 0);
+
+  // Roles available in the role filter dropdown (scoped to selected job)
+  $: filteredRolesByJob = filterJobId
+    ? rolesByJob.filter(g => g.job.id === parseInt(filterJobId))
+    : rolesByJob;
+
+  // Client-side filtering for job and work type
+  $: filteredProjects = projects.filter(p => {
+    if (filterJobId) {
+      const role = roles.find(r => r.id === p.role_id);
+      if (!role || role.job_id !== parseInt(filterJobId)) return false;
+    }
+    if (filterWorkTypeId) {
+      if (!p.work_types?.some(wt => wt.id === parseInt(filterWorkTypeId))) return false;
+    }
+    return true;
+  });
 </script>
 
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -150,29 +178,49 @@
   <div class="msg msg-error">No roles exist yet. Create a job and role first before adding projects.</div>
 {/if}
 
-<div class="form-group" style="max-width: 300px; margin-bottom: 20px;">
-  <label>Filter by Role</label>
-  <select bind:value={filterRoleId}>
-    <option value="">All Roles</option>
-    {#each rolesByJob as group}
-      <optgroup label={group.job.name}>
-        {#each group.roles as role}
-          <option value={role.id}>{role.name}</option>
-        {/each}
-      </optgroup>
-    {/each}
-  </select>
+<div class="filters-row">
+  <div class="form-group">
+    <label>Filter by Job</label>
+    <select bind:value={filterJobId}>
+      <option value="">All Jobs</option>
+      {#each jobs as job}
+        <option value={job.id}>{job.name}</option>
+      {/each}
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Filter by Role</label>
+    <select bind:value={filterRoleId}>
+      <option value="">All Roles</option>
+      {#each filteredRolesByJob as group}
+        <optgroup label={group.job.name}>
+          {#each group.roles as role}
+            <option value={role.id}>{role.name}</option>
+          {/each}
+        </optgroup>
+      {/each}
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Filter by Work Type</label>
+    <select bind:value={filterWorkTypeId}>
+      <option value="">All Work Types</option>
+      {#each $lookups.work_types || [] as wt}
+        <option value={wt.id}>{wt.name}</option>
+      {/each}
+    </select>
+  </div>
 </div>
 
 {#if message}
   <div class="msg msg-{messageType}">{message}</div>
 {/if}
 
-{#if projects.length === 0}
+{#if filteredProjects.length === 0}
   <div class="empty">No projects found.</div>
 {:else}
   <div class="item-list">
-    {#each projects as project}
+    {#each filteredProjects as project}
       <div class="item-row">
         <div class="item-info">
           <div class="item-name">
@@ -294,6 +342,15 @@
 </Modal>
 
 <style>
+  .filters-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .filters-row .form-group {
+    flex: 1;
+    max-width: 240px;
+  }
   .weight-badge {
     display: inline-block;
     font-size: 11px;

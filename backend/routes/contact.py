@@ -8,7 +8,7 @@ bp = Blueprint("contact", __name__, url_prefix="/api/contact")
 @bp.route("", methods=["GET"])
 def get_contact():
     db = get_db()
-    row = db.execute("SELECT name, email, linkedin FROM contact WHERE id = 1").fetchone()
+    row = db.execute("SELECT name, email, linkedin, description FROM contact WHERE id = 1").fetchone()
     db.close()
     return jsonify(dict(row))
 
@@ -22,10 +22,10 @@ def update_contact():
 
     db = get_db()
     db.execute(
-        "UPDATE contact SET name = ?, email = ?, linkedin = ? WHERE id = 1",
-        (data.get("name", ""), data.get("email", ""), data.get("linkedin", "")),
+        "UPDATE contact SET name = ?, email = ?, linkedin = ?, description = ? WHERE id = 1",
+        (data.get("name", ""), data.get("email", ""), data.get("linkedin", ""), data.get("description", "")),
     )
     db.commit()
-    row = db.execute("SELECT name, email, linkedin FROM contact WHERE id = 1").fetchone()
+    row = db.execute("SELECT name, email, linkedin, description FROM contact WHERE id = 1").fetchone()
     db.close()
     return jsonify(dict(row))

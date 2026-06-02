@@ -16,6 +16,47 @@
   --warning: #d4a22e;
   --radius: 8px;
   --radius-sm: 4px;
+
+  /* Public page tokens */
+  --bg-page: #111114;
+  --bg-elevated: #16181e;
+  --bg-surface: #1a1c22;
+  --bg-deep: #0f1014;
+  --bg-inset: #111318;
+
+  --border-subtle: #1e2028;
+  --border-strong: #3a3d48;
+
+  --text-secondary: #c0c3cc;
+  --text-faint: #6b6e7a;
+  --text-muted: #4e515c;
+  --text-ghost: #3a3d48;
+
+  --accent-soft: #7a7faa;
+  --accent-soft-hover: #a0a4cc;
+
+  /* Timeline tags */
+  --tag-new-bg: #2a5a3a;
+  --tag-new-text: #e0e2e8;
+  --tag-promo-bg: #b8a46c;
+  --tag-promo-text: #111114;
+  --tag-current-bg: #3a5a8a;
+  --tag-current-text: #e0e2e8;
+
+  /* Landmark star */
+  --star-color: #d4af37;
+  --star-hover: #f0d060;
+  --star-glow: rgba(212, 175, 55, 0.5);
+  --star-glow-hover: rgba(240, 208, 96, 0.7);
+
+  /* Timeline */
+  --seg-dashed: #222530;
+  --overlay: rgba(0, 0, 0, 0.35);
+  --overlay-heavy: rgba(0, 0, 0, 0.5);
+
+  /* Subtle surface highlights */
+  --highlight: rgba(255, 255, 255, 0.03);
+  --highlight-hover: rgba(255, 255, 255, 0.04);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,6 +66,7 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  overflow-x: hidden;
 }
 
 /* Layout */
@@ -349,3 +391,80 @@ textarea { resize: vertical; min-height: 80px; }
 }
 
 .login-card h1 { text-align: center; margin-bottom: 32px; }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f0f2f5;
+    --bg-card: #ffffff;
+    --bg-input: #ffffff;
+    --bg-hover: #e6e8eb;
+    --border: #d9dce1;
+    --border-focus: #5b6abf;
+    --text: #1a1d27;
+    --text-dim: #5c6275;
+    --text-heading: #1c212d;
+    --accent: #5b6abf;
+    --accent-hover: #4e5ca6;
+
+    --bg-page: #f5f6f8;
+    --bg-elevated: #ffffff;
+    --bg-surface: #f8f9fb;
+    --bg-deep: #eaedf0;
+    --bg-inset: #f0f2f5;
+
+    --border-subtle: #e4e7eb;
+    --border-strong: #c0c5cc;
+
+    --text-secondary: #3a4050;
+    --text-faint: #6a7080;
+    --text-muted: #8a90a0;
+    --text-ghost: #b5bac5;
+
+    --accent-soft: #5b6abf;
+    --accent-soft-hover: #4e5ca6;
+
+    --tag-new-bg: #d4edda;
+    --tag-new-text: #155724;
+    --tag-promo-bg: #f0e6c0;
+    --tag-promo-text: #6b5b1e;
+    --tag-current-bg: #d0e0f5;
+    --tag-current-text: #1a3a5a;
+
+    --star-color: #b8960a;
+    --star-hover: #d4b020;
+    --star-glow: rgba(184, 150, 10, 0.35);
+    --star-glow-hover: rgba(212, 176, 32, 0.5);
+
+    --seg-dashed: #d0d3d8;
+    --overlay: rgba(0, 0, 0, 0.15);
+    --overlay-heavy: rgba(0, 0, 0, 0.25);
+
+    --highlight: rgba(0, 0, 0, 0.025);
+    --highlight-hover: rgba(0, 0, 0, 0.04);
+  }
+
+  .sidebar {
+    background: var(--bg);
+  }
+
+  .sidebar a.active {
+    background: rgba(91, 106, 191, 0.1);
+  }
+
+  .tag {
+    background: rgba(91, 106, 191, 0.1);
+    color: #4e5ca6;
+  }
+
+  .multi-select .chip {
+    background: #4e5ca6;
+  }
+
+  .multi-select .chip button {
+    color: rgba(255,255,255,0.8);
+  }
+
+  .multi-select-options button {
+    background: var(--bg-hover);
+  }
+}

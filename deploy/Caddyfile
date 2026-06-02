@@ -1,4 +1,4 @@
-http://${DOMAIN} {
+${DOMAIN} {
     # Serve uploaded media files directly
     handle /uploads/* {
         root * /opt/portfolio
@@ -31,4 +31,8 @@ http://${DOMAIN} {
         output file /var/log/caddy/portfolio.log
         format json
     }
+}
+
+www.${DOMAIN} {
+    redir https://${DOMAIN}{uri} permanent
 }

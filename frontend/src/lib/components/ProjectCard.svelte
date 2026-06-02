@@ -36,9 +36,10 @@
 
   async function copyLink() {
     const s = slug || (project.work_types?.[0] ? slugify(project.work_types[0].name) : '');
+    const anchor = slugify(project.name);
     const url = s
-      ? `${window.location.origin}/${s}#project-${project.id}`
-      : `${window.location.origin}/#project-${project.id}`;
+      ? `${window.location.origin}/${s}#${anchor}`
+      : `${window.location.origin}/#${anchor}`;
     try {
       await navigator.clipboard.writeText(url);
       copied = true;
@@ -123,7 +124,7 @@
 <article
   class="project-card"
   class:no-media={!hasMedia}
-  id="project-{project.id}"
+  id={slugify(project.name)}
   data-role-id={project.role_id}
 >
   {#if hasMedia}
@@ -303,19 +304,19 @@
   .project-card {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    background: #16181e;
-    border: 1px solid #1e2028;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
     border-radius: 8px;
     overflow: hidden;
     transition: border-color 0.2s;
   }
-  .project-card:hover { border-color: #2a2d35; }
+  .project-card:hover { border-color: var(--border); }
   .project-card.no-media { grid-template-columns: 1fr; }
 
   /* ── Media container ────────────────────────────── */
 
   .card-media {
-    background: #0f1014;
+    background: var(--bg-deep);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -510,7 +511,7 @@
   .card-title {
     font-size: 16px;
     font-weight: 600;
-    color: #e0e2e8;
+    color: var(--text);
     letter-spacing: -0.01em;
     line-height: 1.3;
   }
@@ -518,7 +519,7 @@
   .copy-btn {
     background: none;
     border: 1px solid transparent;
-    color: #3a3d48;
+    color: var(--text-ghost);
     font-size: 18px;
     cursor: pointer;
     padding: 2px 6px;
@@ -527,19 +528,19 @@
     flex-shrink: 0;
     line-height: 1;
   }
-  .copy-btn:hover { color: #6b6e7a; border-color: #2a2d35; }
-  .copy-btn.copied { color: #4a9; }
+  .copy-btn:hover { color: var(--text-faint); border-color: var(--border); }
+  .copy-btn.copied { color: var(--success); }
 
-  .card-meta { font-size: 13px; color: #6b6e7a; margin-bottom: 4px; }
-  .card-date { font-size: 12px; color: #4e515c; margin-bottom: 12px; }
-  .card-description { font-size: 13px; color: #8a8d98; line-height: 1.6; margin-bottom: 12px; }
+  .card-meta { font-size: 13px; color: var(--text-faint); margin-bottom: 4px; }
+  .card-date { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+  .card-description { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 12px; }
 
-  .card-link { font-size: 13px; color: #7a7faa; text-decoration: none; transition: color 0.2s; }
-  .card-link:hover { color: #a0a4cc; }
+  .card-link { font-size: 13px; color: var(--accent-soft); text-decoration: none; transition: color 0.2s; }
+  .card-link:hover { color: var(--accent-soft-hover); }
 
   .card-tags {
     padding-top: 16px;
-    border-top: 1px solid #1e2028;
+    border-top: 1px solid var(--border-subtle);
     margin-top: 16px;
     display: flex;
     flex-direction: column;
@@ -550,16 +551,16 @@
 
   .skill-tag {
     font-size: 11px;
-    color: #5a5e6a;
-    background: #111318;
+    color: var(--text-muted);
+    background: var(--bg-inset);
     padding: 3px 8px;
     border-radius: 3px;
-    border: 1px solid #1e2028;
+    border: 1px solid var(--border-subtle);
   }
 
   .tool-tag {
     font-size: 11px;
-    color: #7a7faa;
+    color: var(--accent-soft);
     background: rgba(122, 127, 170, 0.08);
     padding: 3px 8px;
     border-radius: 3px;

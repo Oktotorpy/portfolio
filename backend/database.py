@@ -103,4 +103,8 @@ def _migrate(conn):
                 (row[0], row[1], row[2])
             )
 
+    # --- contact.description ---
+    if not _column_exists(conn, "contact", "description"):
+        conn.execute("ALTER TABLE contact ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+
     conn.commit()

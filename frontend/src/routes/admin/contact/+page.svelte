@@ -5,6 +5,7 @@
   let name = '';
   let email = '';
   let linkedin = '';
+  let description = '';
   let saving = false;
   let message = '';
   let messageType = '';
@@ -15,6 +16,7 @@
       name = data.name;
       email = data.email;
       linkedin = data.linkedin;
+      description = data.description || '';
     } catch (err) {
       message = err.message;
       messageType = 'error';
@@ -25,10 +27,11 @@
     saving = true;
     message = '';
     try {
-      const data = await api.updateContact({ name, email, linkedin });
+      const data = await api.updateContact({ name, email, linkedin, description });
       name = data.name;
       email = data.email;
       linkedin = data.linkedin;
+      description = data.description || '';
       message = 'Saved successfully';
       messageType = 'success';
     } catch (err) {
@@ -61,6 +64,11 @@
     <div class="form-group">
       <label>LinkedIn URL</label>
       <input type="url" bind:value={linkedin} placeholder="https://linkedin.com/in/..." />
+    </div>
+
+    <div class="form-group">
+      <label>Description</label>
+      <textarea bind:value={description} placeholder="A short bio or description..." rows="4"></textarea>
     </div>
 
     <div class="btn-group">
