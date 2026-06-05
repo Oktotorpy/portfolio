@@ -1,0 +1,19 @@
+[Unit]
+Description=Portfolio election poller (fetch upstream API, store changed snapshot)
+After=network-online.target portfolio-backend.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=portfolio
+Group=portfolio
+WorkingDirectory=/opt/portfolio/backend
+EnvironmentFile=/opt/portfolio/.env
+ExecStart=/opt/portfolio/venv/bin/python /opt/portfolio/backend/jobs/poll_election.py
+
+# Security hardening (writes only the SQLite DB; logs go to journald)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/portfolio/data
+PrivateTmp=true

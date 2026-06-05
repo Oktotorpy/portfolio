@@ -62,6 +62,13 @@ export const api = {
   updateLookup: (table, id, name) => request('PUT', `/api/lookups/${table}/${id}`, { name }),
   deleteLookup: (table, id) => request('DELETE', `/api/lookups/${table}/${id}`),
 
+  // Election data source
+  getElectionConfig: () => request('GET', '/api/election/config'),
+  updateElectionConfig: (data) => request('PUT', '/api/election/config', data),
+  getElectionManual: () => request('GET', '/api/election/manual'),
+  updateElectionManual: (parties) => request('PUT', '/api/election/manual', { data: parties }),
+  testElectionApi: (data) => request('POST', '/api/election/test', data),
+
   // Uploads / Files
   listFiles: () => request('GET', '/api/uploads'),
   deleteFile: (filename) => request('DELETE', `/api/uploads/${filename}`),

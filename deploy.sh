@@ -28,6 +28,23 @@ log()  { echo -e "${GREEN}[+]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
+# Ensure a modern Node is on PATH for the frontend build.
+# Vite/SvelteKit need Node >= 20; Ubuntu 24.04's apt Node is v18 and breaks the
+# build ("node:util does not provide an export named 'styleText'"). Prefer the
+# newest nvm install if one exists.
+select_node() {
+    local newest
+    newest=$(ls -d /root/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -n1 || true)
+    [[ -n "$newest" ]] && export PATH="$newest:$PATH"
+
+    local major
+    major=$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')
+    if [[ -z "$major" || "$major" -lt 20 ]]; then
+        err "Node >= 20 required for the frontend build (found: $(node -v 2>/dev/null || echo none)). Install one with: nvm install 24"
+    fi
+    log "Using Node $(node -v) for build"
+}
+
 # ============================================================
 # SETUP - Run once on fresh server
 # ============================================================
@@ -203,6 +220,7 @@ cmd_pull() {
         --exclude='build' \
         --exclude='.svelte-kit'
 
+    select_node
     log "Installing npm packages..."
     cd "$APP_DIR/frontend"
     npm ci --silent 2>/dev/null || npm install --silent
@@ -220,6 +238,8 @@ cmd_pull() {
     # Install/update systemd services
     cp "$REPO_DIR/deploy/portfolio-backend.service" /etc/systemd/system/
     cp "$REPO_DIR/deploy/portfolio-frontend.service" /etc/systemd/system/
+    cp "$REPO_DIR/deploy/portfolio-election-poll.service" /etc/systemd/system/
+    cp "$REPO_DIR/deploy/portfolio-election-poll.timer" /etc/systemd/system/
     systemctl daemon-reload
 
     # Fix ownership
@@ -242,6 +262,10 @@ cmd_pull() {
     systemctl reload caddy
 
     systemctl enable portfolio-backend portfolio-frontend caddy 2>/dev/null
+
+    # Election poller timer (dormant until ELECTION_API_URL is set in .env)
+    systemctl enable portfolio-election-poll.timer 2>/dev/null
+    systemctl restart portfolio-election-poll.timer
 
     sleep 2
     cmd_status
@@ -267,7 +291,7 @@ cmd_restart() {
 # ============================================================
 cmd_status() {
     echo "=== Service Status ==="
-    for svc in caddy portfolio-backend portfolio-frontend; do
+    for svc in caddy portfolio-backend portfolio-frontend portfolio-election-poll.timer; do
         status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
         if [[ "$status" == "active" ]]; then
             echo -e "  ${GREEN}●${NC} $svc"

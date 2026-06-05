@@ -107,4 +107,34 @@ def _migrate(conn):
     if not _column_exists(conn, "contact", "description"):
         conn.execute("ALTER TABLE contact ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 
+    # --- election_snapshots (history of polled election results) ---
+    if not _table_exists(conn, "election_snapshots"):
+        conn.executescript("""
+            CREATE TABLE election_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fetched_at   TEXT NOT NULL,            -- UTC ISO8601, when we stored it
+                source       TEXT NOT NULL DEFAULT 'api',  -- 'api' | 'placeholder' | 'manual'
+                payload      TEXT NOT NULL,            -- canonical JSON array of parties
+                content_hash TEXT NOT NULL,            -- sha256 of payload, for change-detection
+                http_status  INTEGER                  -- upstream HTTP status, nullable
+            );
+            CREATE INDEX idx_election_snapshots_fetched_at
+                ON election_snapshots (fetched_at DESC);
+        """)
+
+    # --- election_config (CMS-editable data-source settings, singleton) ---
+    if not _table_exists(conn, "election_config"):
+        conn.executescript("""
+            CREATE TABLE election_config (
+                id          INTEGER PRIMARY KEY CHECK (id = 1),
+                source_mode TEXT    NOT NULL DEFAULT 'manual',
+                api_url     TEXT    NOT NULL DEFAULT '',
+                api_proxy   TEXT    NOT NULL DEFAULT '',
+                api_headers TEXT    NOT NULL DEFAULT '',
+                api_timeout INTEGER NOT NULL DEFAULT 30,
+                updated_at  TEXT
+            );
+            INSERT OR IGNORE INTO election_config (id, source_mode) VALUES (1, 'manual');
+        """)
+
     conn.commit()
