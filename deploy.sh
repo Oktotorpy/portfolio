@@ -228,12 +228,26 @@ cmd_pull() {
     log "Building frontend..."
     npm run build
 
-    # Deploy Caddy config
+    # Deploy Caddy config.
+    # CADDY_PROFILE=xray uses deploy/Caddyfile.xray, which keeps Caddy off public
+    # :443 (serves on 127.0.0.1:8443) so a front Xray (VLESS+REALITY) can own 443.
+    # Validate the generated config before swapping it in, so a bad template can't
+    # break the live site on the next reload.
     log "Deploying Caddy config..."
     export DOMAIN BACKEND_PORT FRONTEND_PORT
-    envsubst '${DOMAIN} ${BACKEND_PORT} ${FRONTEND_PORT}' \
-        < "$REPO_DIR/deploy/Caddyfile" \
-        > /etc/caddy/Caddyfile
+    local caddy_tpl="$REPO_DIR/deploy/Caddyfile"
+    if [[ "${CADDY_PROFILE:-default}" == "xray" && -f "$REPO_DIR/deploy/Caddyfile.xray" ]]; then
+        caddy_tpl="$REPO_DIR/deploy/Caddyfile.xray"
+        log "Using xray-fronting Caddy profile (Caddy on 127.0.0.1:8443)"
+    fi
+    envsubst '${DOMAIN} ${BACKEND_PORT} ${FRONTEND_PORT}' < "$caddy_tpl" > /tmp/Caddyfile.new
+    if caddy validate --config /tmp/Caddyfile.new --adapter caddyfile >/dev/null 2>&1; then
+        mv /tmp/Caddyfile.new /etc/caddy/Caddyfile
+    else
+        warn "Generated Caddyfile failed validation — keeping existing /etc/caddy/Caddyfile"
+        caddy validate --config /tmp/Caddyfile.new --adapter caddyfile 2>&1 | tail -5
+        rm -f /tmp/Caddyfile.new
+    fi
 
     # Install/update systemd services
     cp "$REPO_DIR/deploy/portfolio-backend.service" /etc/systemd/system/

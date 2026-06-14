@@ -1,0 +1,63 @@
+# Caddy config for the "xray" profile: Xray owns public :443 (VLESS+REALITY) and
+# fronts this site. Caddy must therefore NOT bind public :443 — it serves the site
+# on 127.0.0.1:8443 (Xray's REALITY fallback dest) and keeps :80 for ACME + redirect.
+# Selected by deploy.sh when CADDY_PROFILE=xray in .env. See deploy/Caddyfile for
+# the standard (Caddy-on-443) profile.
+{
+    auto_https disable_redirects
+}
+
+https://${DOMAIN}:8443 {
+    bind 127.0.0.1
+
+    # Election results taken offline
+    handle /election* {
+        respond "Election results are offline." 404
+    }
+    handle /api/election/* {
+        respond "Election results are offline." 404
+    }
+
+    # Serve uploaded media files directly
+    handle /uploads/* {
+        root * /opt/portfolio
+        file_server
+    }
+
+    # Proxy API requests to Flask/Gunicorn backend
+    handle /api/* {
+        reverse_proxy localhost:${BACKEND_PORT}
+    }
+
+    # Proxy everything else to SvelteKit frontend
+    handle {
+        reverse_proxy localhost:${FRONTEND_PORT}
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    # Gzip compression
+    encode gzip
+
+    # Logging
+    log {
+        output file /var/log/caddy/portfolio.log
+        format json
+    }
+}
+
+https://www.${DOMAIN}:8443 {
+    bind 127.0.0.1
+    redir https://${DOMAIN}{uri} permanent
+}
+
+# Public :80 — ACME HTTP-01 challenge + redirect to HTTPS (Xray on :443).
+http://${DOMAIN}, http://www.${DOMAIN} {
+    redir https://${DOMAIN}{uri} permanent
+}
