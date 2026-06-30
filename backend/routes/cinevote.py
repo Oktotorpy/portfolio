@@ -161,18 +161,40 @@ def _runoff_contention(db, event_id):
     return [pid for pid, p in scores.items() if p == top]
 
 
+def _pick_owner(db, pick_id):
+    r = db.execute("SELECT user_id FROM cinevote_picks WHERE id = ?", (pick_id,)).fetchone()
+    return r["user_id"] if r else None
+
+
+def _max_votes(db, event_id, voter_id, rnd):
+    """How many votes a voter casts this round: 2 in the main round (capped by the
+    number of non-own movies), 1 in the runoff."""
+    if rnd == 1:
+        non_own = db.execute(
+            "SELECT COUNT(*) c FROM cinevote_picks WHERE event_id = ? AND user_id != ?",
+            (event_id, voter_id)).fetchone()["c"]
+        return min(2, non_own)
+    return 1 if any(_pick_owner(db, pid) != voter_id for pid in _runoff_contention(db, event_id)) else 0
+
+
+def _vote_count(db, event_id, voter_id, rnd):
+    return db.execute(
+        "SELECT COUNT(*) c FROM cinevote_votes WHERE event_id = ? AND voter_id = ? AND round = ?",
+        (event_id, voter_id, rnd)).fetchone()["c"]
+
+
 def _maybe_advance(db, event_id):
-    """After a vote: if everyone voted this round, conclude or start a runoff."""
+    """After a vote: if everyone used all their votes this round, conclude or runoff."""
     ev = db.execute("SELECT * FROM cinevote_events WHERE id = ?", (event_id,)).fetchone()
     if not ev or ev["status"] not in ("voting", "runoff"):
         return
     rnd = 1 if ev["status"] == "voting" else 2
-    participants = set(_participants(db, event_id))
-    voters = {r["voter_id"] for r in db.execute(
-        "SELECT voter_id FROM cinevote_votes WHERE event_id = ? AND round = ?",
-        (event_id, rnd)).fetchall()}
-    if not participants or not participants.issubset(voters):
-        return  # not everyone has voted yet
+    participants = _participants(db, event_id)
+    if not participants:
+        return
+    for uid in participants:
+        if _vote_count(db, event_id, uid, rnd) < _max_votes(db, event_id, uid, rnd):
+            return  # someone still has votes to cast
 
     if rnd == 1:
         contention = list(_round1_tally(db, event_id).items())
@@ -223,14 +245,16 @@ def _serialize_event(db, ev, user_id):
         "ORDER BY p.created_at ASC, p.id ASC", (eid,)).fetchall()
 
     watched_ids = set()
-    my_vote_pick_id = None
+    my_vote_pick_ids = []
+    my_vote_max = 0
     if user_id:
         watched_ids = {r["pick_id"] for r in db.execute(
             "SELECT pick_id FROM cinevote_watched WHERE user_id = ?", (user_id,)).fetchall()}
-        vrow = db.execute(
+        my_vote_pick_ids = [r["pick_id"] for r in db.execute(
             "SELECT pick_id FROM cinevote_votes WHERE event_id = ? AND voter_id = ? AND round = ?",
-            (eid, user_id, rnd)).fetchone()
-        my_vote_pick_id = vrow["pick_id"] if vrow else None
+            (eid, user_id, rnd)).fetchall()]
+        if status in ("voting", "runoff"):
+            my_vote_max = _max_votes(db, eid, user_id, rnd)
 
     scores = _round1_tally(db, eid) if concluded else {}
 
@@ -249,18 +273,18 @@ def _serialize_event(db, ev, user_id):
             "points": scores.get(p["id"], 0) if concluded else None,
         })
 
-    # participants + (during voting) who has voted this round
-    voters = set()
-    if status in ("voting", "runoff"):
-        voters = {r["voter_id"] for r in db.execute(
-            "SELECT voter_id FROM cinevote_votes WHERE event_id = ? AND round = ?",
-            (eid, rnd)).fetchall()}
+    # participants + (during voting) who has finished casting their votes
+    voting = status in ("voting", "runoff")
     participants = db.execute(
         "SELECT p.user_id, u.username FROM cinevote_picks p "
         "JOIN cinevote_users u ON u.id = p.user_id WHERE p.event_id = ? "
         "ORDER BY p.created_at ASC", (eid,)).fetchall()
-    part_list = [{"user_id": r["user_id"], "username": r["username"],
-                  "has_voted": r["user_id"] in voters} for r in participants]
+    part_list = []
+    for r in participants:
+        done = False
+        if voting:
+            done = _vote_count(db, eid, r["user_id"], rnd) >= _max_votes(db, eid, r["user_id"], rnd)
+        part_list.append({"user_id": r["user_id"], "username": r["username"], "has_voted": done})
 
     results = None
     if concluded:
@@ -277,7 +301,8 @@ def _serialize_event(db, ev, user_id):
         "picks": pick_list,
         "participants": part_list,
         "my_pick_id": my_pick_id,
-        "my_vote_pick_id": my_vote_pick_id,
+        "my_vote_pick_ids": my_vote_pick_ids,
+        "my_vote_max": my_vote_max,
         "can_pick": status == "picking" and user_id is not None and my_pick_id is None,
         "runoff_pick_ids": runoff_ids if status == "runoff" else [],
         "results": results,
@@ -394,14 +419,65 @@ def vote():
                          (uid, pick_id)).fetchone()
     points = 1 if watched else 2  # unseen = 2, seen = 1
 
-    # one vote per round: replace any existing
-    db.execute("DELETE FROM cinevote_votes WHERE event_id = ? AND voter_id = ? AND round = ?", (ev["id"], uid, rnd))
-    db.execute("INSERT INTO cinevote_votes (event_id, voter_id, pick_id, points, round, created_at) "
-               "VALUES (?,?,?,?,?,?)", (ev["id"], uid, pick_id, points, rnd, _now()))
+    if rnd == 2:
+        # runoff: single vote — replace any existing
+        db.execute("DELETE FROM cinevote_votes WHERE event_id = ? AND voter_id = ? AND round = 2", (ev["id"], uid))
+        db.execute("INSERT INTO cinevote_votes (event_id, voter_id, pick_id, points, round, created_at) "
+                   "VALUES (?,?,?,?,2,?)", (ev["id"], uid, pick_id, points, _now()))
+    else:
+        # main round: toggle, up to 2 distinct movies
+        existing = db.execute(
+            "SELECT 1 FROM cinevote_votes WHERE event_id = ? AND voter_id = ? AND pick_id = ? AND round = 1",
+            (ev["id"], uid, pick_id)).fetchone()
+        if existing:
+            db.execute("DELETE FROM cinevote_votes WHERE event_id = ? AND voter_id = ? AND pick_id = ? AND round = 1",
+                       (ev["id"], uid, pick_id))
+        else:
+            if _vote_count(db, ev["id"], uid, 1) >= _max_votes(db, ev["id"], uid, 1):
+                db.close()
+                return jsonify({"error": "You've picked your 2 movies — deselect one to change"}), 400
+            db.execute("INSERT INTO cinevote_votes (event_id, voter_id, pick_id, points, round, created_at) "
+                       "VALUES (?,?,?,?,1,?)", (ev["id"], uid, pick_id, points, _now()))
     db.commit()
 
     _maybe_advance(db, ev["id"])
     out = _serialize_event(db, db.execute("SELECT * FROM cinevote_events WHERE id = ?", (ev["id"],)).fetchone(), uid)
+    db.close()
+    return jsonify(out)
+
+
+@bp.route("/start-voting", methods=["POST"])
+@cv.require_user
+def user_start_voting():
+    """Live-page 'All movies picked' — any logged-in user opens voting."""
+    db = get_db()
+    ev = _live_event(db)
+    if not ev or ev["status"] != "picking":
+        db.close()
+        return jsonify({"error": "Not in the picking phase"}), 409
+    n = db.execute("SELECT COUNT(*) c FROM cinevote_picks WHERE event_id = ?", (ev["id"],)).fetchone()["c"]
+    if n < 2:
+        db.close()
+        return jsonify({"error": "Need at least 2 picks to start voting"}), 409
+    db.execute("UPDATE cinevote_events SET status = 'voting' WHERE id = ?", (ev["id"],))
+    db.commit()
+    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
+    db.close()
+    return jsonify(out)
+
+
+@bp.route("/revert", methods=["POST"])
+@cv.require_user
+def user_revert():
+    """Revert voting -> picking (e.g. a latecomer wants in). Keeps picks AND votes."""
+    db = get_db()
+    ev = _live_event(db)
+    if not ev or ev["status"] != "voting":
+        db.close()
+        return jsonify({"error": "Can only revert during voting"}), 409
+    db.execute("UPDATE cinevote_events SET status = 'picking' WHERE id = ?", (ev["id"],))
+    db.commit()
+    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
     db.close()
     return jsonify(out)
 

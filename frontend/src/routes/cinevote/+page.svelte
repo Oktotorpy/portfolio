@@ -31,6 +31,8 @@
 	$: phase = state?.event ? state.phase : null;
 	$: picks = state?.picks ?? [];
 	$: myPick = picks.find((p) => p.is_mine);
+	$: myVotes = state?.my_vote_pick_ids ?? [];
+	$: myVoteMax = state?.my_vote_max ?? 0;
 	$: winnerPick = state?.results ? picks.find((p) => p.id === state.results.winner_pick_id) : null;
 
 	onMount(async () => {
@@ -137,6 +139,30 @@
 			state = await cinevote.toggleWatched(p.id);
 		} catch (e) {
 			error = e.message;
+		}
+	}
+
+	async function startVoting() {
+		busy = true;
+		error = '';
+		try {
+			state = await cinevote.startVoting();
+		} catch (e) {
+			error = e.message;
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function revert() {
+		busy = true;
+		error = '';
+		try {
+			state = await cinevote.revert();
+		} catch (e) {
+			error = e.message;
+		} finally {
+			busy = false;
 		}
 	}
 
@@ -266,15 +292,33 @@
 				<h1>{state.event.name || 'Movie Night'}</h1>
 				<p class="dim">{state.event.event_date}</p>
 			</div>
-			<span class="phase phase-{phase}">
-				{phase === 'picking' ? 'Picking' : phase === 'voting' ? 'Voting' : phase === 'runoff' ? 'Runoff' : 'Concluded'}
-			</span>
+			<div class="event-actions">
+				<span class="phase phase-{phase}">
+					{phase === 'picking' ? 'Picking' : phase === 'voting' ? 'Voting' : phase === 'runoff' ? 'Runoff' : 'Concluded'}
+				</span>
+				{#if phase === 'picking'}
+					<button class="primary sm" on:click={startVoting} disabled={busy || picks.length < 2} title={picks.length < 2 ? 'Need at least 2 picks' : 'Open voting'}>
+						All movies picked →
+					</button>
+				{:else if phase === 'voting'}
+					<button class="ghost sm" on:click={revert} disabled={busy} title="Someone wants in? Go back to picking (keeps picks & votes)">
+						↩ Revert to picking
+					</button>
+				{/if}
+			</div>
 		</div>
 
 		{#if error}<div class="err">{error}</div>{/if}
 
 		<div class="layout">
 			<main>
+				{#if phase === 'voting' || phase === 'runoff'}
+					<p class="vote-hint">
+						{phase === 'runoff' ? '🥊 Runoff — pick the winner' : `Pick ${myVoteMax} movie${myVoteMax === 1 ? '' : 's'} to watch`}
+						<span class="count">· {myVotes.length}/{myVoteMax} chosen</span>
+					</p>
+				{/if}
+
 				<!-- SEARCH (picking only) -->
 				{#if phase === 'picking'}
 					<div class="search" class:greyed={!!myPick}>
@@ -328,11 +372,11 @@
 									{#if (phase === 'voting' || phase === 'runoff') && !p.is_mine && (phase !== 'runoff' || p.in_runoff)}
 										<button
 											class="ctl vote"
-											class:active={state.my_vote_pick_id === p.id}
+											class:active={myVotes.includes(p.id)}
 											on:click={() => castVote(p)}
-											disabled={busy}
+											disabled={busy || (!myVotes.includes(p.id) && myVotes.length >= myVoteMax)}
 											title={p.watched_by_me ? 'Vote (1 pt — you watched it)' : 'Vote (2 pts — unseen)'}
-										>✓ Vote</button>
+										>{myVotes.includes(p.id) ? '✓ Picked' : 'Vote'}</button>
 									{/if}
 									<button
 										class="ctl watch"
@@ -435,7 +479,9 @@
 	.auth { max-width: 340px; margin: 3rem auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
 	.auth form { display: flex; flex-direction: column; gap: 0.7rem; margin: 1rem 0; }
 
-	.event-bar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1rem; }
+	.event-bar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1rem; gap: 1rem; }
+	.event-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; }
+	.primary.sm, .ghost.sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
 	.phase { padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
 	.phase-picking { background: var(--tag-new-bg); color: var(--tag-new-text); }
 	.phase-voting { background: var(--tag-current-bg); color: var(--tag-current-text); }
@@ -443,6 +489,9 @@
 	.phase-concluded { background: var(--bg-hover); color: var(--text-dim); }
 
 	.layout { display: grid; grid-template-columns: 1fr 220px; gap: 1.5rem; align-items: start; }
+
+	.vote-hint { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.9rem; margin-bottom: 1rem; font-weight: 600; color: var(--text-heading); }
+	.vote-hint .count { color: var(--text-dim); font-weight: 400; }
 
 	.search { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
 	.search.greyed input { opacity: 0.55; }

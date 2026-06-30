@@ -189,4 +189,28 @@ def _migrate(conn):
             );
         """)
 
+    # --- cinevote_votes: allow up to 2 votes/voter in the main round (distinct picks) ---
+    if _table_exists(conn, "cinevote_votes"):
+        uniq_cols = set()
+        for idx in conn.execute("PRAGMA index_list(cinevote_votes)").fetchall():
+            if idx["origin"] == "u":  # table-level UNIQUE constraint
+                for ci in conn.execute(f"PRAGMA index_info('{idx['name']}')").fetchall():
+                    uniq_cols.add(ci["name"])
+        if "pick_id" not in uniq_cols:  # old UNIQUE(event_id,voter_id,round) -> rebuild
+            conn.executescript("""
+                CREATE TABLE cinevote_votes_new (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id   INTEGER NOT NULL REFERENCES cinevote_events(id) ON DELETE CASCADE,
+                    voter_id   INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+                    pick_id    INTEGER NOT NULL REFERENCES cinevote_picks(id) ON DELETE CASCADE,
+                    points     INTEGER NOT NULL,
+                    round      INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(event_id, voter_id, pick_id, round)
+                );
+                INSERT INTO cinevote_votes_new SELECT * FROM cinevote_votes;
+                DROP TABLE cinevote_votes;
+                ALTER TABLE cinevote_votes_new RENAME TO cinevote_votes;
+            """)
+
     conn.commit()

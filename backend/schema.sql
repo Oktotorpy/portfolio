@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS cinevote_votes (
     voter_id   INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
     pick_id    INTEGER NOT NULL REFERENCES cinevote_picks(id) ON DELETE CASCADE,
     points     INTEGER NOT NULL,                     -- 1 (seen) or 2 (unseen), frozen at cast
-    round      INTEGER NOT NULL DEFAULT 1,           -- 1 = main, 2 = runoff
+    round      INTEGER NOT NULL DEFAULT 1,           -- 1 = main (up to 2 votes), 2 = runoff (1 vote)
     created_at TEXT NOT NULL,
-    UNIQUE(event_id, voter_id, round)                -- one vote per voter per round
+    UNIQUE(event_id, voter_id, pick_id, round)       -- distinct picks; up to 2/voter in round 1
 );

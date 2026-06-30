@@ -24,6 +24,8 @@ export const cinevote = {
 	deletePick: () => req('DELETE', '/pick'),
 	toggleWatched: (pick_id) => req('POST', '/watched', { pick_id }),
 	vote: (pick_id) => req('POST', '/vote', { pick_id }),
+	startVoting: () => req('POST', '/start-voting'),
+	revert: () => req('POST', '/revert'),
 	history: () => req('GET', '/history'),
 
 	// admin (CMS-auth)
