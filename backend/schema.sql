@@ -188,3 +188,59 @@ CREATE TABLE IF NOT EXISTS election_config (
     updated_at  TEXT
 );
 INSERT OR IGNORE INTO election_config (id, source_mode) VALUES (1, 'manual');
+
+-- ============================================================
+-- CineVote: group movie-night voting (vitz.pro/cinevote)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS cinevote_users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cinevote_sessions (
+    token      TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cinevote_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL DEFAULT '',
+    event_date     TEXT NOT NULL,                    -- ISO date of the movie night
+    status         TEXT NOT NULL DEFAULT 'picking',  -- picking | voting | runoff | concluded
+    winner_pick_id INTEGER,                          -- set when concluded
+    created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cinevote_picks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id   INTEGER NOT NULL REFERENCES cinevote_events(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+    tmdb_id    INTEGER NOT NULL,
+    imdb_id    TEXT,                                 -- for imdb.com click-through
+    title      TEXT NOT NULL,
+    year       TEXT,
+    poster_url TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(event_id, user_id),                       -- one pick per user per event
+    UNIQUE(event_id, tmdb_id)                        -- a movie only once per event
+);
+
+CREATE TABLE IF NOT EXISTS cinevote_watched (
+    user_id INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+    pick_id INTEGER NOT NULL REFERENCES cinevote_picks(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, pick_id)
+);
+
+CREATE TABLE IF NOT EXISTS cinevote_votes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id   INTEGER NOT NULL REFERENCES cinevote_events(id) ON DELETE CASCADE,
+    voter_id   INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+    pick_id    INTEGER NOT NULL REFERENCES cinevote_picks(id) ON DELETE CASCADE,
+    points     INTEGER NOT NULL,                     -- 1 (seen) or 2 (unseen), frozen at cast
+    round      INTEGER NOT NULL DEFAULT 1,           -- 1 = main, 2 = runoff
+    created_at TEXT NOT NULL,
+    UNIQUE(event_id, voter_id, round)                -- one vote per voter per round
+);

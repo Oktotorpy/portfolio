@@ -60,6 +60,7 @@
     { href: '/admin/projects', label: 'Projects', icon: '📁' },
     { href: '/admin/files', label: 'Files', icon: '🖼️' },
     { href: '/admin/election', label: 'Election', icon: '🗳️' },
+    { href: '/admin/cinevote', label: 'CineVote', icon: '🎬' },
     { href: '/admin/settings', label: 'Settings', icon: '⚙️' }
   ];
 

@@ -15,6 +15,7 @@ from routes.projects import bp as projects_bp
 from routes.lookups import bp as lookups_bp
 from routes.uploads import bp as uploads_bp
 from routes.election import bp as election_bp
+from routes.cinevote import bp as cinevote_bp
 
 
 def create_app():
@@ -40,6 +41,7 @@ def create_app():
     app.register_blueprint(lookups_bp)
     app.register_blueprint(uploads_bp)
     app.register_blueprint(election_bp)
+    app.register_blueprint(cinevote_bp)
 
     @app.route("/api/health")
     def health():

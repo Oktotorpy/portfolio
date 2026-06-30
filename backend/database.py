@@ -137,4 +137,56 @@ def _migrate(conn):
             INSERT OR IGNORE INTO election_config (id, source_mode) VALUES (1, 'manual');
         """)
 
+    # --- CineVote tables ---
+    if not _table_exists(conn, "cinevote_users"):
+        conn.executescript("""
+            CREATE TABLE cinevote_users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                created_at    TEXT NOT NULL
+            );
+            CREATE TABLE cinevote_sessions (
+                token      TEXT PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE cinevote_events (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                name           TEXT NOT NULL DEFAULT '',
+                event_date     TEXT NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'picking',
+                winner_pick_id INTEGER,
+                created_at     TEXT NOT NULL
+            );
+            CREATE TABLE cinevote_picks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id   INTEGER NOT NULL REFERENCES cinevote_events(id) ON DELETE CASCADE,
+                user_id    INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+                tmdb_id    INTEGER NOT NULL,
+                imdb_id    TEXT,
+                title      TEXT NOT NULL,
+                year       TEXT,
+                poster_url TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(event_id, user_id),
+                UNIQUE(event_id, tmdb_id)
+            );
+            CREATE TABLE cinevote_watched (
+                user_id INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+                pick_id INTEGER NOT NULL REFERENCES cinevote_picks(id) ON DELETE CASCADE,
+                PRIMARY KEY (user_id, pick_id)
+            );
+            CREATE TABLE cinevote_votes (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id   INTEGER NOT NULL REFERENCES cinevote_events(id) ON DELETE CASCADE,
+                voter_id   INTEGER NOT NULL REFERENCES cinevote_users(id) ON DELETE CASCADE,
+                pick_id    INTEGER NOT NULL REFERENCES cinevote_picks(id) ON DELETE CASCADE,
+                points     INTEGER NOT NULL,
+                round      INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                UNIQUE(event_id, voter_id, round)
+            );
+        """)
+
     conn.commit()
