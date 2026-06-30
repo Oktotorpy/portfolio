@@ -14,7 +14,7 @@ Lifecycle of an event: picking -> voting -> [runoff] -> concluded.
 
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from flask import Blueprint, request, jsonify, make_response, g
 
@@ -132,10 +132,15 @@ def _tmdb_imdb_id(tmdb_id):
 # event helpers
 # --------------------------------------------------------------------------- #
 def _live_event(db):
-    """Earliest-dated event that isn't concluded, or None."""
+    """The current live event: earliest-dated event that is either not concluded,
+    or concluded but whose date is at most 2 days in the past — so the winner/results
+    stay on the live page for 2 days after the movie night, then it drops to history."""
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
     return db.execute(
-        "SELECT * FROM cinevote_events WHERE status != 'concluded' "
-        "ORDER BY event_date ASC, id ASC LIMIT 1"
+        "SELECT * FROM cinevote_events "
+        "WHERE status != 'concluded' OR event_date >= ? "
+        "ORDER BY event_date ASC, id ASC LIMIT 1",
+        (cutoff,),
     ).fetchone()
 
 
