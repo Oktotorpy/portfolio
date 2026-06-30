@@ -474,13 +474,22 @@ def user_start_voting():
 @bp.route("/revert", methods=["POST"])
 @cv.require_user
 def user_revert():
-    """Revert voting -> picking (e.g. a latecomer wants in). Keeps picks AND votes."""
+    """Step the live event back one phase, keeping picks and (main-round) votes:
+    concluded/runoff -> voting (un-conclude, drop runoff votes), voting -> picking."""
     db = get_db()
     ev = _live_event(db)
-    if not ev or ev["status"] != "voting":
+    if not ev:
         db.close()
-        return jsonify({"error": "Can only revert during voting"}), 409
-    db.execute("UPDATE cinevote_events SET status = 'picking' WHERE id = ?", (ev["id"],))
+        return jsonify({"error": "No live event"}), 409
+    st = ev["status"]
+    if st == "voting":
+        db.execute("UPDATE cinevote_events SET status = 'picking', winner_pick_id = NULL WHERE id = ?", (ev["id"],))
+    elif st in ("runoff", "concluded"):
+        db.execute("DELETE FROM cinevote_votes WHERE event_id = ? AND round = 2", (ev["id"],))
+        db.execute("UPDATE cinevote_events SET status = 'voting', winner_pick_id = NULL WHERE id = ?", (ev["id"],))
+    else:
+        db.close()
+        return jsonify({"error": "Nothing to revert"}), 409
     db.commit()
     out = _serialize_event(db, _live_event(db), g.cv_user["id"])
     db.close()

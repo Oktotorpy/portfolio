@@ -37,6 +37,8 @@
 	$: myPick = picks.find((p) => p.is_mine);
 	$: myVotes = state?.my_vote_pick_ids ?? [];
 	$: myVoteMax = state?.my_vote_max ?? 0;
+	// reset the reveal whenever we're not on a concluded event (e.g. after revert/re-poll)
+	$: if (phase !== 'concluded' && revealing) revealing = false;
 	$: winnerPick = state?.results ? picks.find((p) => p.id === state.results.winner_pick_id) : null;
 
 	onMount(async () => {
@@ -333,6 +335,10 @@
 				{:else if phase === 'voting'}
 					<button class="ghost sm" on:click={revert} disabled={busy} title="Someone wants in? Go back to picking (keeps picks & votes)">
 						↩ Revert to picking
+					</button>
+				{:else if phase === 'runoff' || phase === 'concluded'}
+					<button class="ghost sm" on:click={revert} disabled={busy} title="Re-open voting (keeps picks & main-round votes)">
+						↩ Revert to voting
 					</button>
 				{/if}
 			</div>
