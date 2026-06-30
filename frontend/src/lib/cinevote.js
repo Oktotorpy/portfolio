@@ -20,6 +20,7 @@ export const cinevote = {
 	search: (q) => req('GET', `/search?q=${encodeURIComponent(q)}`),
 
 	event: () => req('GET', '/event'),
+	createEvent: (data) => req('POST', '/events', data),
 	addPick: (movie) => req('POST', '/pick', movie),
 	deletePick: () => req('DELETE', '/pick'),
 	toggleWatched: (pick_id) => req('POST', '/watched', { pick_id }),

@@ -487,6 +487,24 @@ def user_revert():
     return jsonify(out)
 
 
+@bp.route("/events", methods=["POST"])
+@cv.require_user
+def user_create_event():
+    """Create a movie night from the live page (any logged-in user)."""
+    data = request.get_json() or {}
+    event_date = (data.get("event_date") or "").strip()
+    if not event_date:
+        return jsonify({"error": "Pick a date"}), 400
+    db = get_db()
+    db.execute(
+        "INSERT INTO cinevote_events (name, event_date, status, created_at) VALUES (?,?, 'picking', ?)",
+        ((data.get("name") or "").strip(), event_date, _now()))
+    db.commit()
+    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
+    db.close()
+    return jsonify(out)
+
+
 @bp.route("/history", methods=["GET"])
 def history():
     """Concluded events with their winner + ranking (public)."""

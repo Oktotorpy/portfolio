@@ -21,6 +21,10 @@
 	let searchTimer;
 	let busy = false;
 
+	// create event (when none is live)
+	let newName = '';
+	let newDate = '';
+
 	// reveal
 	let revealing = false;
 	let reelActive = false;
@@ -166,6 +170,21 @@
 		}
 	}
 
+	async function createEvent() {
+		if (!newDate) return;
+		busy = true;
+		error = '';
+		try {
+			state = await cinevote.createEvent({ name: newName, event_date: newDate });
+			newName = '';
+			newDate = '';
+		} catch (e) {
+			error = e.message;
+		} finally {
+			busy = false;
+		}
+	}
+
 	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 	async function revealWinner() {
@@ -174,12 +193,12 @@
 		if (winIdx < 0) return;
 		revealing = true;
 		reelActive = true;
-		const spins = picks.length * 3 + winIdx;
-		let delay = 55;
+		const spins = picks.length * 4 + winIdx;
+		let delay = 85;
 		for (let step = 0; step <= spins; step++) {
 			reelIndex = step % picks.length;
 			await sleep(delay);
-			if (step > spins - picks.length) delay += 22; // decelerate
+			if (step > spins - picks.length * 1.5) delay += 38; // decelerate — slower, dramatic tail
 		}
 		reelIndex = winIdx;
 		reelActive = false;
@@ -284,7 +303,18 @@
 			</p>
 		</div>
 	{:else if !state?.event}
-		<p class="dim center">No movie night scheduled yet. Check back soon.</p>
+		<div class="auth">
+			<h1>Start a movie night</h1>
+			<p class="dim">No event scheduled — create one:</p>
+			{#if error}<div class="err">{error}</div>{/if}
+			<form on:submit|preventDefault={createEvent}>
+				<input placeholder="Name (optional)" bind:value={newName} />
+				<input type="date" bind:value={newDate} />
+				<button class="primary" disabled={busy || !newDate}>
+					{busy ? '…' : 'Create movie night'}
+				</button>
+			</form>
+		</div>
 	{:else}
 		<!-- EVENT -->
 		<div class="event-bar">
@@ -409,18 +439,20 @@
 								<button class="primary big" on:click={revealWinner}>🎰 Reveal the winner</button>
 							{/if}
 						</div>
-						<table class="ranking">
-							<tbody>
-								{#each state.results.ranking as r, i (r.pick_id)}
-									<tr class:win={r.pick_id === state.results.winner_pick_id}>
-										<td class="rank">{i + 1}</td>
-										<td>{r.title}</td>
-										<td class="pts">{r.points} pt{r.points === 1 ? '' : 's'}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-						{#if state.results.had_runoff}<p class="dim sm">Decided by runoff.</p>{/if}
+						{#if revealing && !reelActive}
+							<table class="ranking">
+								<tbody>
+									{#each state.results.ranking as r, i (r.pick_id)}
+										<tr class:win={r.pick_id === state.results.winner_pick_id}>
+											<td class="rank">{i + 1}</td>
+											<td>{r.title}</td>
+											<td class="pts">{r.points} pt{r.points === 1 ? '' : 's'}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+							{#if state.results.had_runoff}<p class="dim sm">Decided by runoff.</p>{/if}
+						{/if}
 					</section>
 				{/if}
 			</main>
