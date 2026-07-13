@@ -18,6 +18,8 @@ export const cinevote = {
 	logout: () => req('POST', '/logout'),
 
 	search: (q) => req('GET', `/search?q=${encodeURIComponent(q)}`),
+	movie: (tmdbId) => req('GET', `/movie/${tmdbId}`),
+	flipCoin: () => req('POST', '/flip-coin'),
 
 	event: () => req('GET', '/event'),
 	createEvent: (data) => req('POST', '/events', data),

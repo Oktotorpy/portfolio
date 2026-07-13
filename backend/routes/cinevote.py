@@ -116,6 +116,41 @@ def search():
     return jsonify(out)
 
 
+@bp.route("/movie/<int:tmdb_id>", methods=["GET"])
+@cv.require_user
+def movie_details(tmdb_id):
+    """Full details for the info card: director, cast (+photos), overview, rating."""
+    if not TMDB_API_KEY:
+        return jsonify({"error": "not configured"}), 503
+    import requests
+    try:
+        r = requests.get(f"https://api.themoviedb.org/3/movie/{tmdb_id}",
+                         params={"api_key": TMDB_API_KEY, "append_to_response": "credits"}, timeout=10)
+        m = r.json()
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"lookup failed: {e}"}), 502
+    if "id" not in m:
+        return jsonify({"error": "not found"}), 404
+    credits = m.get("credits", {})
+    directors = [c["name"] for c in credits.get("crew", []) if c.get("job") == "Director"]
+    cast = [{
+        "name": c.get("name"),
+        "character": c.get("character"),
+        "photo": ("https://image.tmdb.org/t/p/w185" + c["profile_path"]) if c.get("profile_path") else None,
+    } for c in credits.get("cast", [])[:8]]
+    return jsonify({
+        "tmdb_id": tmdb_id,
+        "title": m.get("title") or m.get("original_title"),
+        "year": (m.get("release_date") or "")[:4],
+        "director": ", ".join(directors),
+        "overview": m.get("overview") or "",
+        "rating": round(m.get("vote_average") or 0, 1),
+        "poster_url": (TMDB_IMG + m["poster_path"]) if m.get("poster_path") else None,
+        "imdb_id": m.get("imdb_id"),
+        "cast": cast,
+    })
+
+
 def _tmdb_imdb_id(tmdb_id):
     if not TMDB_API_KEY:
         return None
@@ -157,13 +192,28 @@ def _round1_tally(db, event_id):
     return {r["pick_id"]: r["pts"] for r in rows}
 
 
-def _runoff_contention(db, event_id):
-    """Pick ids tied for the lead in round 1 (the runoff candidates)."""
-    scores = _round1_tally(db, event_id)
+def _round_tally(db, event_id, rnd):
+    rows = db.execute(
+        "SELECT pick_id, SUM(points) pts FROM cinevote_votes "
+        "WHERE event_id = ? AND round = ? GROUP BY pick_id", (event_id, rnd)).fetchall()
+    return {r["pick_id"]: r["pts"] for r in rows}
+
+
+def _leaders(scores):
     if not scores:
         return []
     top = max(scores.values())
     return [pid for pid, p in scores.items() if p == top]
+
+
+def _runoff_contention(db, event_id):
+    """Pick ids tied for the lead in round 1 (the runoff candidates)."""
+    return _leaders(_round_tally(db, event_id, 1))
+
+
+def _coinflip_contention(db, event_id):
+    """Pick ids still tied after the runoff (the coin-flip candidates)."""
+    return _leaders(_round_tally(db, event_id, 2))
 
 
 def _pick_owner(db, pick_id):
@@ -222,12 +272,9 @@ def _maybe_advance(db, event_id):
         db.execute("UPDATE cinevote_events SET status = 'runoff' WHERE id = ?", (event_id,))
         db.commit()
     else:
-        # still tied after runoff -> earliest-created pick among the tied wins
-        row = db.execute(
-            "SELECT id FROM cinevote_picks WHERE id IN ({}) "
-            "ORDER BY created_at ASC, id ASC LIMIT 1".format(",".join("?" * len(winners))),
-            winners).fetchone()
-        _conclude(db, event_id, row["id"] if row else winners[0])
+        # still tied after the runoff -> decide with a coin flip
+        db.execute("UPDATE cinevote_events SET status = 'coinflip' WHERE id = ?", (event_id,))
+        db.commit()
 
 
 def _conclude(db, event_id, winner_pick_id):
@@ -243,6 +290,7 @@ def _serialize_event(db, ev, user_id):
     concluded = status == "concluded"
     rnd = 2 if status == "runoff" else 1
     runoff_ids = _runoff_contention(db, eid) if status in ("runoff", "concluded") else []
+    coinflip_ids = _coinflip_contention(db, eid) if status == "coinflip" else []
 
     picks = db.execute(
         "SELECT p.*, u.username AS owner_name FROM cinevote_picks p "
@@ -310,6 +358,7 @@ def _serialize_event(db, ev, user_id):
         "my_vote_max": my_vote_max,
         "can_pick": status == "picking" and user_id is not None and my_pick_id is None,
         "runoff_pick_ids": runoff_ids if status == "runoff" else [],
+        "coinflip_pick_ids": coinflip_ids,
         "results": results,
     }
 
@@ -509,6 +558,26 @@ def user_create_event():
         "INSERT INTO cinevote_events (name, event_date, status, created_at) VALUES (?,?, 'picking', ?)",
         ((data.get("name") or "").strip(), event_date, _now()))
     db.commit()
+    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
+    db.close()
+    return jsonify(out)
+
+
+@bp.route("/flip-coin", methods=["POST"])
+@cv.require_user
+def flip_coin():
+    """Break a still-tied runoff by picking a random winner among the tied movies."""
+    import random
+    db = get_db()
+    ev = _live_event(db)
+    if not ev or ev["status"] != "coinflip":
+        db.close()
+        return jsonify({"error": "Not awaiting a coin flip"}), 409
+    contention = _coinflip_contention(db, ev["id"])
+    if not contention:
+        db.close()
+        return jsonify({"error": "No tied movies"}), 409
+    _conclude(db, ev["id"], random.choice(contention))
     out = _serialize_event(db, _live_event(db), g.cv_user["id"])
     db.close()
     return jsonify(out)
