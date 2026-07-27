@@ -10,6 +10,10 @@
 https://${DOMAIN}:8443 {
     bind 127.0.0.1
 
+    # External demos (reverse-tunnelled from other machines) drop route snippets
+    # here so they survive deploy.sh regenerating this file. e.g. /qr, /hub.
+    import /etc/caddy/sites-extra/*.caddy
+
     # Election results taken offline
     handle /election* {
         respond "Election results are offline." 404
