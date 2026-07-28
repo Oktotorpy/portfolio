@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { currentRoleId } from '$lib/stores.js';
   import { formatDate, formatDateRange } from '$lib/utils.js';
+  import { computePopupStyle } from '$lib/popupPosition.js';
   import PublicShell from '$lib/components/PublicShell.svelte';
 
   export let data;
@@ -14,6 +15,8 @@
   let selectedRole = null;
   let popupStyle = '';
   let hoveredJobId = null;
+  let projectPopupEl;
+  let rolePopupEl;
 
   // Popup media state
   let popupVideoIndex = 0;
@@ -298,43 +301,63 @@
     selectedProject = project;
     popupVideoIndex = 0;
     popupShortsPage = 0;
-    positionPopup(event);
+    void positionPopup(event);
   }
 
   function openRolePopup(roleData, event) {
     selectedProject = null;
     selectedRole = roleData;
     if (roleData.id) $currentRoleId = roleData.id;
-    positionPopup(event);
+    void positionPopup(event);
   }
 
-  function positionPopup(event) {
+  async function positionPopup(event) {
     const rect = event.currentTarget.getBoundingClientRect();
     const viewW = window.innerWidth;
-    const viewH = window.innerHeight;
     const popupW = Math.min(360, viewW - 32);
 
     if (isMobile) {
       // Mobile: fixed at bottom center
       popupStyle = `position: fixed; bottom: 68px; left: 50%; transform: translateX(-50%); max-width: ${popupW}px;`;
     } else {
-      // Desktop: absolute, scrolls with page
+      // Desktop: absolute, scrolls with page. Two-pass placement: provisional
+      // (visibility: hidden, estimated height) → tick() → measure real height
+      // off the mounted popup ref → final (visible, measured height).
       const scrollY = window.scrollY || window.pageYOffset;
       const scrollX = window.scrollX || window.pageXOffset;
-      const pageX = rect.left + rect.width / 2 + scrollX;
-      const pageY = rect.top + scrollY;
+      const markerViewTop = rect.top;
+      const markerHeight = rect.height;
+      const markerCenterX = rect.left + rect.width / 2;
+      const gap = 12;
+      const bottomMargin = 16;
+      const estimatedPopupH = 320;
 
-      let left = pageX;
-      left = Math.max(popupW / 2 + 16, Math.min(viewW + scrollX - popupW / 2 - 16, left));
-
-      const viewTop = rect.top;
-      if (viewTop < 320) {
-        const top = pageY + rect.height + 12;
-        popupStyle = `position: absolute; top: ${top}px; left: ${left}px; transform: translateX(-50%); max-width: ${popupW}px;`;
-      } else {
-        const top = pageY - 12;
-        popupStyle = `position: absolute; top: ${top}px; left: ${left}px; transform: translate(-50%, -100%); max-width: ${popupW}px;`;
+      let topMargin;
+      try {
+        const navH = document.querySelector('.main-nav')?.getBoundingClientRect().height ?? 0;
+        topMargin = navH > 0 ? navH + 8 : 12;
+      } catch {
+        topMargin = 12;
       }
+
+      const provisional = computePopupStyle({
+        markerViewTop, markerHeight, markerCenterX, scrollX, scrollY,
+        viewW, viewH: window.innerHeight, popupW, popupH: estimatedPopupH,
+        gap, topMargin, bottomMargin,
+      });
+      popupStyle = `${provisional.style} visibility: hidden;`;
+
+      await tick();
+
+      const measuredEl = projectPopupEl ?? rolePopupEl;
+      const popupH = measuredEl?.getBoundingClientRect().height || estimatedPopupH;
+
+      const final = computePopupStyle({
+        markerViewTop, markerHeight, markerCenterX, scrollX, scrollY,
+        viewW, viewH: window.innerHeight, popupW, popupH,
+        gap, topMargin, bottomMargin,
+      });
+      popupStyle = final.style;
     }
   }
 
@@ -493,7 +516,7 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="popup-backdrop" on:click={closePopup}></div>
-    <div class="popup-card" style={popupStyle} on:click|stopPropagation>
+    <div class="popup-card" style={popupStyle} bind:this={projectPopupEl} on:click|stopPropagation>
       <button class="popup-close" on:click={closePopup}>×</button>
 
       {#if selectedProject.media?.length > 0}
@@ -593,7 +616,7 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="popup-backdrop" on:click={closePopup}></div>
-    <div class="popup-card" style={popupStyle} on:click|stopPropagation>
+    <div class="popup-card" style={popupStyle} bind:this={rolePopupEl} on:click|stopPropagation>
       <button class="popup-close" on:click={closePopup}>×</button>
       <div class="popup-body">
         <h3 class="popup-title">{selectedRole.name}</h3>
