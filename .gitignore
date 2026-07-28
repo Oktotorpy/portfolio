@@ -37,3 +37,11 @@ backups/
 
 # Examples
 Examples/
+
+# Data (local exports / scratch)
+Data/
+
+# DCS per-worktree / main-only state
+.dcs/ACTIVE
+.dcs/CLOSED
+.dcs/esg/
