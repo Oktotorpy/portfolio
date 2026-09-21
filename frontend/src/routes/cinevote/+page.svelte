@@ -1,11 +1,16 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
 	import { cinevote, imdbUrl } from '$lib/cinevote.js';
+	import { MODES, ACCENTS, loadTheme, applyTheme, clearTheme } from '$lib/cinevoteTheme.js';
 
 	let me = null;
 	let state = null;
 	let loading = true;
 	let error = '';
+
+	// theme
+	let mode = 'dark';
+	let accent = 'amber';
 
 	// auth
 	let authMode = 'login';
@@ -21,9 +26,11 @@
 	let searchTimer;
 	let busy = false;
 
-	// create event
-	let newName = '';
-	let newDate = '';
+	// clock
+	let tick = Date.now();
+	let clockTimer;
+	let serverOffset = 0; // server clock minus browser clock
+	let expiredAt = null; // deadline we already reloaded for
 
 	// reveal (slot machine)
 	let revealing = false;
@@ -50,21 +57,49 @@
 	$: votingDone = (phase === 'voting' || phase === 'runoff') && myVoteMax > 0 && myVotes.length >= myVoteMax;
 	$: if (phase !== 'concluded' && revealing && !coinFlipping) revealing = false;
 
+	// --- schedule ---------------------------------------------------------
+	$: deadlineMs = state?.phase_deadline ? Date.parse(state.phase_deadline) : null;
+	$: msLeft = deadlineMs === null ? null : deadlineMs - (tick + serverOffset);
+	$: if (msLeft !== null && msLeft <= 0 && expiredAt !== deadlineMs && !busy) {
+		expiredAt = deadlineMs;
+		loadEvent();
+	}
+
 	onMount(async () => {
+		const t = loadTheme();
+		mode = t.mode;
+		accent = t.accent;
+		applyTheme(mode, accent);
+
 		try {
 			me = await cinevote.me();
 		} catch {}
 		if (me) await loadEvent();
 		loading = false;
+		clockTimer = setInterval(() => (tick = Date.now()), 1000);
 		poll = setInterval(() => {
 			if (me && !revealing && !coinFlipping && !busy && document.visibilityState === 'visible') loadEvent();
 		}, 4000);
 	});
-	onDestroy(() => clearInterval(poll));
+	onDestroy(() => {
+		clearInterval(poll);
+		clearInterval(clockTimer);
+		clearTheme();
+	});
+
+	function setMode(m) {
+		mode = m;
+		applyTheme(mode, accent);
+	}
+	function setAccent(a) {
+		accent = a;
+		applyTheme(mode, accent);
+	}
 
 	async function loadEvent() {
 		try {
 			state = await cinevote.event();
+			if (state?.server_now) serverOffset = Date.parse(state.server_now) - Date.now();
 		} catch (e) {
 			error = e.message;
 		}
@@ -143,42 +178,6 @@
 			state = await cinevote.toggleWatched(p.id);
 		} catch (e) {
 			error = e.message;
-		}
-	}
-	async function startVoting() {
-		busy = true;
-		error = '';
-		try {
-			state = await cinevote.startVoting();
-		} catch (e) {
-			error = e.message;
-		} finally {
-			busy = false;
-		}
-	}
-	async function revert() {
-		busy = true;
-		error = '';
-		try {
-			state = await cinevote.revert();
-		} catch (e) {
-			error = e.message;
-		} finally {
-			busy = false;
-		}
-	}
-	async function createEvent() {
-		if (!newDate) return;
-		busy = true;
-		error = '';
-		try {
-			state = await cinevote.createEvent({ name: newName, event_date: newDate });
-			newName = '';
-			newDate = '';
-		} catch (e) {
-			error = e.message;
-		} finally {
-			busy = false;
 		}
 	}
 
@@ -265,7 +264,16 @@
 		const ctx = canvas.getContext('2d');
 		canvas.width = canvas.offsetWidth;
 		canvas.height = canvas.offsetHeight;
-		const colors = ['#5b6abf', '#d4af37', '#3daa6d', '#e66060', '#6e7dd4', '#f0d060'];
+		// confetti follows the active theme
+		const css = getComputedStyle(document.documentElement);
+		const tok = (name, fallback) => (css.getPropertyValue(name) || '').trim() || fallback;
+		const colors = [
+			tok('--cv-accent', '#d8a72e'),
+			tok('--cv-ok', '#63a56e'),
+			tok('--cv-warn', '#c9a13f'),
+			tok('--cv-err', '#cf6157'),
+			tok('--cv-fg', '#d3d8de')
+		];
 		const parts = Array.from({ length: 150 }, () => ({
 			x: canvas.width / 2, y: canvas.height / 3,
 			vx: Math.cos(Math.random() * Math.PI * 2) * (3 + Math.random() * 7),
@@ -301,90 +309,175 @@
 		return { destroy: () => io.disconnect() };
 	}
 
-	const RULES = {
-		picking:
-			'Pick a movie you want to watch — one each. Voting begins when everyone has picked and the "All movies picked" button is pressed.',
-		voting:
-			"Pick two movies. You can't vote for your own. Tap the eye for movies you've already seen — unseen movies are worth 2 points, seen movies 1 point.",
-		runoff: "It's a tie! Vote again — only between the tied movies below.",
-		coinflip: 'Still tied after the runoff. Flip a coin to decide.'
+	// --- phase presentation ------------------------------------------------
+	const STAGES = [
+		{ key: 'pick', label: 'PICK', phases: ['picking'] },
+		{ key: 'vote', label: 'VOTE', phases: ['voting', 'runoff', 'coinflip'] },
+		{ key: 'result', label: 'RESULT', phases: ['concluded'] }
+	];
+
+	const PHASE = {
+		picking: {
+			title: 'PICKING',
+			tag: null,
+			desc: 'Search and lock in one movie each. A film can only be picked once per night, and you can swap yours until picking closes.',
+			clock: 'picking closes in'
+		},
+		voting: {
+			title: 'VOTING',
+			tag: null,
+			desc: "Two votes each, on two different movies, never your own. Flag what you have already seen: unseen is worth 2 points, seen 1.",
+			clock: 'voting closes in'
+		},
+		runoff: {
+			title: 'VOTING',
+			tag: 'TIE-BREAK',
+			desc: 'Dead heat at the top. One vote each, only between the tied movies below.',
+			clock: 'voting closes in'
+		},
+		coinflip: {
+			title: 'VOTING',
+			tag: 'COIN FLIP',
+			desc: 'Still tied after the tie-break. The coin decides — flip it.',
+			clock: 'voting closes in'
+		},
+		concluded: {
+			title: 'DECIDED',
+			tag: null,
+			desc: 'The vote is in. The winner is below — see you at the premiere.',
+			clock: null
+		}
 	};
+
+	$: stageIndex = STAGES.findIndex((s) => s.phases.includes(phase));
+	$: info = PHASE[phase] ?? null;
+
+	function stageState(i) {
+		if (stageIndex < 0) return 'todo';
+		if (i < stageIndex) return 'done';
+		if (i === stageIndex) return 'now';
+		return 'todo';
+	}
+
+	function fmtLeft(ms) {
+		if (ms === null) return '';
+		if (ms <= 0) return '00:00:00';
+		const total = Math.floor(ms / 1000);
+		const d = Math.floor(total / 86400);
+		const h = Math.floor((total % 86400) / 3600);
+		const m = Math.floor((total % 3600) / 60);
+		const s = total % 60;
+		const pad = (n) => String(n).padStart(2, '0');
+		return `${d > 0 ? d + 'd ' : ''}${pad(h)}:${pad(m)}:${pad(s)}`;
+	}
+
+	function fmtPrague(iso) {
+		if (!iso) return '';
+		try {
+			return new Intl.DateTimeFormat('en-GB', {
+				weekday: 'short', day: '2-digit', month: 'short',
+				hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Prague'
+			}).format(new Date(iso));
+		} catch {
+			return iso.slice(0, 16).replace('T', ' ');
+		}
+	}
 </script>
 
-<svelte:head><title>CineVote</title></svelte:head>
+<svelte:head>
+	<title>cinevote</title>
+	<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/jetbrains-mono@5.3.0/index.css" />
+</svelte:head>
 
 <div class="cv">
 	<header class="cv-head">
-		<a class="brand" href="/cinevote">🎬 CineVote</a>
-		{#if me}
-			<div class="who"><span>{me.username}</span><button class="ghost" on:click={doLogout}>Log out</button></div>
-		{/if}
+		<a class="brand" href="/cinevote"><span class="bar"></span>cinevote</a>
+
+		<div class="head-right">
+			<div class="theme" role="group" aria-label="Theme">
+				<div class="modes">
+					{#each MODES as m (m)}
+						<button class="mode" class:on={mode === m} on:click={() => setMode(m)} title="{m} theme">{m}</button>
+					{/each}
+				</div>
+				<div class="swatches">
+					{#each ACCENTS as a (a)}
+						<button class="swatch sw-{a}" class:on={accent === a} on:click={() => setAccent(a)} title="{a} accent" aria-label="{a} accent"></button>
+					{/each}
+				</div>
+			</div>
+			{#if me}
+				<div class="who"><span class="uname">{me.username}</span><button class="ghost" on:click={doLogout}>log out</button></div>
+			{/if}
+		</div>
 	</header>
 
 	{#if loading}
-		<p class="dim center">Loading…</p>
+		<p class="dim center">loading…</p>
 	{:else if !me}
-		<div class="card-box">
-			<h1>{authMode === 'login' ? 'Log in' : 'Create account'}</h1>
+		<div class="panel-box">
+			<h1><span class="prompt">&gt;</span>{authMode === 'login' ? 'log in' : 'create account'}</h1>
 			{#if authError}<div class="err">{authError}</div>{/if}
 			<form on:submit|preventDefault={doAuth}>
-				<input placeholder="Username" bind:value={authUser} autocomplete="username" />
-				<input type="password" placeholder="Password" bind:value={authPass} autocomplete={authMode === 'login' ? 'current-password' : 'new-password'} />
-				<button class="primary" disabled={authBusy}>{authBusy ? '…' : authMode === 'login' ? 'Log in' : 'Register'}</button>
+				<label class="field">
+					<span>username</span>
+					<input bind:value={authUser} autocomplete="username" />
+				</label>
+				<label class="field">
+					<span>password</span>
+					<input type="password" bind:value={authPass} autocomplete={authMode === 'login' ? 'current-password' : 'new-password'} />
+				</label>
+				<button class="primary" disabled={authBusy}>{authBusy ? '…' : authMode === 'login' ? 'log in' : 'register'}</button>
 			</form>
-			<p class="dim">
-				{authMode === 'login' ? 'No account?' : 'Have an account?'}
-				<button class="link" on:click={() => (authMode = authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Register' : 'Log in'}</button>
+			<p class="dim sm">
+				{authMode === 'login' ? 'no account?' : 'have an account?'}
+				<button class="link" on:click={() => (authMode = authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'register' : 'log in'}</button>
 			</p>
 		</div>
 	{:else if !state?.event}
-		<div class="card-box">
-			<h1>Start a movie night</h1>
-			<p class="dim">No event scheduled — create one:</p>
-			{#if error}<div class="err">{error}</div>{/if}
-			<form on:submit|preventDefault={createEvent}>
-				<input placeholder="Name (optional)" bind:value={newName} />
-				<input type="date" bind:value={newDate} />
-				<button class="primary" disabled={busy || !newDate}>{busy ? '…' : 'Create movie night'}</button>
-			</form>
+		<div class="panel-box">
+			<h1><span class="prompt">&gt;</span>no movie night scheduled</h1>
+			<p class="dim sm">Nothing on the calendar yet. The next one is scheduled from the admin panel — picking opens six days before the premiere.</p>
 		</div>
 	{:else}
-		<div class="event-bar">
-			<div>
-				<h1>{state.event.name || 'Movie Night'}</h1>
-				<p class="dim">{state.event.event_date}</p>
+		<!-- ===== PHASE STAGE ===== -->
+		<section class="stage">
+			<div class="stage-rail">
+				{#each STAGES as st, i (st.key)}
+					<div class="rail-step" data-state={stageState(i)}>
+						<span class="rail-n">{i + 1}</span>
+						<span class="rail-label">{st.label}</span>
+					</div>
+					{#if i < STAGES.length - 1}<span class="rail-sep" data-state={stageState(i)}></span>{/if}
+				{/each}
 			</div>
-			<div class="event-actions">
-				<span class="phase phase-{phase}">
-					{phase === 'picking' ? 'Picking' : phase === 'voting' ? 'Voting' : phase === 'runoff' ? 'Runoff' : phase === 'coinflip' ? 'Coin flip' : 'Concluded'}
-				</span>
-				{#if phase === 'picking'}
-					<button class="primary sm" on:click={startVoting} disabled={busy || picks.length < 2} title={picks.length < 2 ? 'Need at least 2 picks' : 'Open voting'}>All movies picked →</button>
-				{:else if phase === 'voting'}
-					<button class="ghost sm" on:click={revert} disabled={busy}>↩ Revert to picking</button>
-				{:else if phase === 'runoff' || phase === 'concluded' || phase === 'coinflip'}
-					<button class="ghost sm" on:click={revert} disabled={busy}>↩ Revert to voting</button>
-				{/if}
-			</div>
-		</div>
 
-		{#if error}<div class="err">{error}</div>{/if}
+			<div class="stage-body">
+				<div class="stage-line">
+					<h1 class="stage-title">{info?.title ?? phase}</h1>
+					{#if info?.tag}<span class="stage-tag">{info.tag}</span>{/if}
+					<span class="stage-meta">{state.event.name || 'movie night'} · {state.event.event_date}</span>
+				</div>
 
-		<!-- per-phase rules -->
-		{#if RULES[phase]}
-			<div class="rules">{RULES[phase]}</div>
-		{/if}
+				<p class="stage-desc">{info?.desc ?? ''}</p>
 
-		<div class="layout">
-			<main>
-				<!-- tie-breaker banner -->
-				{#if phase === 'runoff' || phase === 'coinflip'}
-					<div class="tiebreaker">
-						<div class="tb-title">TIE-BREAKER</div>
-						<div class="tb-sub">Votes split evenly between those movies. {phase === 'runoff' ? 'Vote again to decide.' : ''}</div>
+				{#if info?.clock && deadlineMs !== null}
+					<div class="clock" class:urgent={msLeft !== null && msLeft < 6 * 3600 * 1000}>
+						<span class="clock-label">{info.clock}</span>
+						<span class="clock-value">{fmtLeft(msLeft)}</span>
+						<span class="clock-abs">// {fmtPrague(state.phase_deadline)} Prague</span>
 					</div>
 				{/if}
 
+				<p class="stage-foot">4 days to pick &middot; 2 days to vote &middot; decided at midnight on premiere day</p>
+			</div>
+		</section>
+
+		{#if error}<div class="err">{error}</div>{/if}
+
+		<div class="layout">
+			<main>
 				<!-- coin flip -->
 				{#if phase === 'coinflip'}
 					<div class="coin-section">
@@ -397,7 +490,7 @@
 							</div>
 						{/if}
 						{#if !coinFlipping}
-							<button class="primary big" on:click={flipCoin} disabled={busy}>🪙 Flip a coin</button>
+							<button class="primary big" on:click={flipCoin} disabled={busy}>flip the coin</button>
 						{/if}
 					</div>
 				{/if}
@@ -405,19 +498,20 @@
 				<!-- SEARCH (picking) -->
 				{#if phase === 'picking'}
 					<div class="search" class:greyed={!!myPick}>
-						<input placeholder={myPick ? 'You already picked — delete it to choose another' : 'Search a movie…'} bind:value={q} on:input={onSearchInput} disabled={!!myPick || busy} />
+						<span class="prompt">$</span>
+						<input placeholder={myPick ? 'you already picked — remove it to choose another' : 'search a movie…'} bind:value={q} on:input={onSearchInput} disabled={!!myPick || busy} />
 						{#if searching}<span class="dim sm">searching…</span>{/if}
 					</div>
 					{#if results.length && !myPick}
-						<div class="grid results">
+						<div class="grid results-grid">
 							{#each results as m (m.tmdb_id)}
-								<button class="poster pick-result" on:click={() => pickMovie(m)} disabled={busy} title="Pick this">
-									<img src={m.poster_url} alt={m.title} loading="lazy" />
-									<span class="cap">{m.title}{#if m.year} <em>({m.year})</em>{/if}</span>
+								<button class="poster pick-result" on:click={() => pickMovie(m)} disabled={busy} title="pick this">
+									<div class="poster-img"><img src={m.poster_url} alt={m.title} loading="lazy" /></div>
+									<span class="cap"><span class="title">{m.title}</span>{#if m.year} <em>{m.year}</em>{/if}</span>
 								</button>
 							{/each}
 						</div>
-						<hr />
+						<div class="rule"></div>
 					{/if}
 				{/if}
 
@@ -426,32 +520,33 @@
 					<div class="grid" use:observeCenter>
 						{#each picks as p (p.id)}
 							<div class="poster" class:voted={myVotes.includes(p.id)} class:greyed={votingDone && !myVotes.includes(p.id)} class:winner={phase === 'concluded' && p.id === state.results?.winner_pick_id} class:dim-out={phase === 'runoff' && !p.in_runoff}>
-								<div class="poster-img" on:click={() => posterClick(p)} on:keydown={(e) => e.key === 'Enter' && posterClick(p)} role="button" tabindex="0" title={votable(p) ? 'Click to vote' : 'Click for info'}>
+								<div class="poster-img" on:click={() => posterClick(p)} on:keydown={(e) => e.key === 'Enter' && posterClick(p)} role="button" tabindex="0" title={votable(p) ? 'click to vote' : 'click for info'}>
 									{#if p.poster_url}
 										<img src={p.poster_url} alt={p.title} loading="lazy" />
 									{:else}
 										<div class="noposter">{p.title}</div>
 									{/if}
 									{#if p.is_mine && phase === 'picking'}
-										<button class="corner del" on:click|stopPropagation={removePick} title="Remove your pick" disabled={busy}>✕</button>
+										<button class="corner" on:click|stopPropagation={removePick} title="remove your pick" disabled={busy}>✕</button>
 									{/if}
 									{#if myVotes.includes(p.id)}<span class="vote-flag">✓</span>{/if}
+									{#if phase === 'concluded' && p.id === state.results?.winner_pick_id}<span class="win-flag">winner</span>{/if}
 								</div>
 
 								<div class="cap">
-									{p.title}{#if p.year} <em>({p.year})</em>{/if}
-									<small class="dim">· {p.owner_name}</small>
+									<span class="title">{p.title}</span>{#if p.year} <em>{p.year}</em>{/if}
+									<span class="owner">@{p.owner_name}</span>
 								</div>
 
 								<div class="card-actions">
-									<button class="act" on:click={() => openInfo(p)} title="Movie info">ℹ Info</button>
-									<button class="act" class:active={p.watched_by_me} on:click={() => toggleWatched(p)} title="Mark as seen">👁 Seen</button>
+									<button class="act" on:click={() => openInfo(p)} title="movie info">info</button>
+									<button class="act" class:active={p.watched_by_me} on:click={() => toggleWatched(p)} title="mark as seen">{p.watched_by_me ? 'seen' : 'unseen'}</button>
 								</div>
 							</div>
 						{/each}
 					</div>
 				{:else}
-					<p class="dim">No picks yet{phase === 'picking' ? ' — be the first.' : '.'}</p>
+					<p class="dim">no picks yet{phase === 'picking' ? ' — be the first.' : '.'}</p>
 				{/if}
 
 				<!-- RESULTS -->
@@ -466,9 +561,9 @@
 										<div class="reel-cap">{r?.title}</div>
 									</div>
 								{/each}
-								{#if !reelActive}<div class="winner-tag">🏆 Winner!</div>{/if}
+								{#if !reelActive}<div class="winner-tag">winner</div>{/if}
 							{:else}
-								<button class="primary big" on:click={revealWinner}>🎰 Reveal the winner</button>
+								<button class="primary big" on:click={revealWinner}>reveal the winner</button>
 							{/if}
 						</div>
 						{#if revealing && !reelActive}
@@ -476,39 +571,40 @@
 								<tbody>
 									{#each state.results.ranking as r, i (r.pick_id)}
 										<tr class:win={r.pick_id === state.results.winner_pick_id}>
-											<td class="rank">{i + 1}</td>
+											<td class="rank">{String(i + 1).padStart(2, '0')}</td>
 											<td>{r.title}</td>
 											<td class="pts">{r.points} pt{r.points === 1 ? '' : 's'}</td>
 										</tr>
 									{/each}
 								</tbody>
 							</table>
-							{#if state.results.had_runoff}<p class="dim sm">Decided by runoff.</p>{/if}
+							{#if state.results.had_runoff}<p class="dim sm">decided by tie-break.</p>{/if}
 						{/if}
 					</section>
 				{/if}
 			</main>
 
-			<aside class="panel">
-				<h3>Who picked</h3>
+			<aside class="side">
+				<h3>participants</h3>
 				{#if state.participants.length}
 					<ul>
 						{#each state.participants as part (part.user_id)}
 							<li>
+								<span class="dot" class:voted={(phase === 'voting' || phase === 'runoff') && part.has_voted} class:picked={phase !== 'voting' && phase !== 'runoff'}></span>
+								<span class="pname">{part.username}</span>
 								{#if phase === 'voting' || phase === 'runoff'}
-									<span class="dot" class:voted={part.has_voted}></span>
-								{:else}
-									<span class="dot picked"></span>
+									<span class="pstate">{part.has_voted ? 'voted' : 'waiting'}</span>
 								{/if}
-								{part.username}
 							</li>
 						{/each}
 					</ul>
 					{#if phase === 'voting' || phase === 'runoff'}
-						<p class="dim sm">{state.participants.filter((p) => p.has_voted).length}/{state.participants.length} voted</p>
+						<p class="dim sm counter">{state.participants.filter((p) => p.has_voted).length}/{state.participants.length} voted</p>
+					{:else}
+						<p class="dim sm counter">{state.participants.length} picked</p>
 					{/if}
 				{:else}
-					<p class="dim sm">Nobody yet.</p>
+					<p class="dim sm">nobody yet.</p>
 				{/if}
 			</aside>
 		</div>
@@ -523,14 +619,14 @@
 			<div class="modal-head">
 				{#if infoData?.poster_url}<img class="modal-poster" src={infoData.poster_url} alt={infoData.title} />{/if}
 				<div>
-					<h2>{infoData?.title}{#if infoData?.year} <span class="dim">({infoData.year})</span>{/if}</h2>
-					{#if infoData?.rating}<div class="rating">★ {infoData.rating}<span class="dim"> / 10</span></div>{/if}
-					{#if infoData?.director}<p class="meta"><span class="dim">Director:</span> {infoData.director}</p>{/if}
-					{#if infoData?.imdb_id}<a class="imdb-link" href={imdbUrl(infoData)} target="_blank" rel="noopener">View on IMDb ↗</a>{/if}
+					<h2>{infoData?.title}{#if infoData?.year} <span class="dim">{infoData.year}</span>{/if}</h2>
+					{#if infoData?.rating}<div class="rating">{infoData.rating}<span class="dim">/10</span></div>{/if}
+					{#if infoData?.director}<p class="meta"><span class="dim">dir.</span> {infoData.director}</p>{/if}
+					{#if infoData?.imdb_id}<a class="imdb-link" href={imdbUrl(infoData)} target="_blank" rel="noopener">imdb ↗</a>{/if}
 				</div>
 			</div>
 			{#if infoLoading}
-				<p class="dim">Loading…</p>
+				<p class="dim">loading…</p>
 			{:else}
 				{#if infoData?.overview}<p class="overview">{infoData.overview}</p>{/if}
 				{#if infoData?.cast?.length}
@@ -550,147 +646,386 @@
 {/if}
 
 <style>
-	.cv {
-		max-width: 1100px;
-		margin: 0 auto;
-		padding: 1.25rem 1rem 4rem;
-		color: var(--text);
-		font-family: 'Century Gothic', 'Futura', 'URW Gothic', 'Avant Garde', 'Trebuchet MS', sans-serif;
+	/* ===================================================================
+	   THEME TOKENS
+	   Set as attributes on <html> by cinevoteTheme.js, so the modal (which
+	   renders outside .cv) inherits them too. Only CineVote pages set them,
+	   so the rest of the site keeps its own palette.
+	   =================================================================== */
+	:global(html[data-cv-theme='dark']),
+	:global(html:not([data-cv-theme])) {
+		--cv-bg: #0c0e11;
+		--cv-surface: #131619;
+		--cv-inset: #0f1215;
+		--cv-line: #232830;
+		--cv-line-hi: #333a45;
+		--cv-fg: #d3d8de;
+		--cv-fg-dim: #7c8590;
+		--cv-fg-faint: #545c66;
+		--cv-ok: #63a56e;
+		--cv-warn: #c9a13f;
+		--cv-err: #cf6157;
+		--cv-shade: rgba(255, 255, 255, 0.025);
+
+		--cv-a-amber: #d8a72e;
+		--cv-a-blue: #4f9cf0;
+		--cv-a-green: #5fb36a;
+		--cv-a-magenta: #bd7ad4;
+		--cv-a-cyan: #3fb5ad;
+		--cv-a-red: #dc6a5c;
 	}
-	.cv-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-	.brand { font-size: 1.5rem; font-weight: 700; color: var(--text-heading); text-decoration: none; letter-spacing: 0.02em; }
-	.who { display: flex; gap: 0.75rem; align-items: center; color: var(--text-dim); }
+	:global(html[data-cv-theme='light']) {
+		--cv-bg: #f4f4f1;
+		--cv-surface: #fbfbf9;
+		--cv-inset: #ecece8;
+		--cv-line: #d8d8d1;
+		--cv-line-hi: #b9b9b0;
+		--cv-fg: #21252a;
+		--cv-fg-dim: #5d646c;
+		--cv-fg-faint: #8b9199;
+		--cv-ok: #2f7d3b;
+		--cv-warn: #8a6510;
+		--cv-err: #b53f32;
+		--cv-shade: rgba(0, 0, 0, 0.02);
+
+		--cv-a-amber: #96690a;
+		--cv-a-blue: #1f66d6;
+		--cv-a-green: #2a7a35;
+		--cv-a-magenta: #8b3fa8;
+		--cv-a-cyan: #0f7b74;
+		--cv-a-red: #bc4033;
+	}
+
+	:global(html[data-cv-accent='amber']),
+	:global(html:not([data-cv-accent])) { --cv-accent: var(--cv-a-amber); }
+	:global(html[data-cv-accent='blue']) { --cv-accent: var(--cv-a-blue); }
+	:global(html[data-cv-accent='green']) { --cv-accent: var(--cv-a-green); }
+	:global(html[data-cv-accent='magenta']) { --cv-accent: var(--cv-a-magenta); }
+	:global(html[data-cv-accent='cyan']) { --cv-accent: var(--cv-a-cyan); }
+	:global(html[data-cv-accent='red']) { --cv-accent: var(--cv-a-red); }
+
+	:global(html) {
+		--cv-accent-bg: color-mix(in srgb, var(--cv-accent) 13%, transparent);
+		--cv-accent-bg-hi: color-mix(in srgb, var(--cv-accent) 22%, transparent);
+		--cv-accent-line: color-mix(in srgb, var(--cv-accent) 55%, transparent);
+	}
+
+	:global(html[data-cv-theme] body) {
+		background: var(--cv-bg);
+		color: var(--cv-fg);
+	}
+
+	/* ===================================================================
+	   BASE — monospace, square corners, hairline rules
+	   =================================================================== */
+	.cv {
+		--mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'IBM Plex Mono', 'SFMono-Regular', Consolas,
+			'DejaVu Sans Mono', 'Liberation Mono', Menlo, monospace;
+		max-width: 1180px;
+		margin: 0 auto;
+		padding: 1.5rem 1.25rem 5rem;
+		color: var(--cv-fg);
+		background: var(--cv-bg);
+		font-family: var(--mono);
+		font-size: 0.875rem;
+		line-height: 1.55;
+		min-height: 100vh;
+	}
+	.cv :global(*) { border-radius: 0; }
+
+	.dim { color: var(--cv-fg-dim); }
+	.sm { font-size: 0.78rem; }
 	.center { text-align: center; margin-top: 3rem; }
-	.dim { color: var(--text-dim); }
-	.sm { font-size: 0.8rem; }
-	h1 { color: var(--text-heading); margin: 0 0 0.25rem; font-size: 1.6rem; }
-	h3 { color: var(--text-heading); margin: 0 0 0.75rem; font-size: 1rem; }
+	.prompt { color: var(--cv-accent); margin-right: 0.45rem; }
+	.rule { border-top: 1px solid var(--cv-line); margin: 1.5rem 0; }
 
-	.err { background: rgba(217, 79, 79, 0.12); border: 1px solid var(--danger); color: #f0b4b4; padding: 0.6rem 0.8rem; border-radius: var(--radius-sm); margin: 0.75rem 0; }
+	h1 { font-size: 1.05rem; font-weight: 600; letter-spacing: 0.02em; margin: 0 0 0.9rem; }
+	h2 { font-size: 1rem; font-weight: 600; margin: 0 0 0.4rem; }
+	h3 {
+		font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+		letter-spacing: 0.14em; color: var(--cv-fg-faint);
+		margin: 0 0 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--cv-line);
+	}
 
-	input { width: 100%; padding: 0.6rem 0.8rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font: inherit; }
-	input:focus { outline: none; border-color: var(--border-focus); }
+	/* --- header ------------------------------------------------------ */
+	.cv-head {
+		display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+		flex-wrap: wrap; padding-bottom: 0.9rem; border-bottom: 1px solid var(--cv-line);
+		margin-bottom: 1.5rem;
+	}
+	.brand {
+		display: inline-flex; align-items: center; gap: 0.5rem;
+		font-size: 1.05rem; font-weight: 600; letter-spacing: 0.06em;
+		color: var(--cv-fg); text-decoration: none;
+	}
+	.brand .bar { width: 4px; height: 1.05rem; background: var(--cv-accent); display: block; }
+	.head-right { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 
+	.theme { display: flex; align-items: center; gap: 0.75rem; }
+	.modes { display: flex; border: 1px solid var(--cv-line); }
+	.mode {
+		background: transparent; border: none; color: var(--cv-fg-faint);
+		font: inherit; font-size: 0.72rem; padding: 0.22rem 0.55rem;
+		letter-spacing: 0.06em;
+	}
+	.mode + .mode { border-left: 1px solid var(--cv-line); }
+	.mode:hover { color: var(--cv-fg); background: var(--cv-shade); }
+	.mode.on { background: var(--cv-accent-bg); color: var(--cv-accent); }
+
+	.swatches { display: flex; gap: 0.3rem; }
+	.swatch { width: 15px; height: 15px; border: 1px solid var(--cv-line-hi); padding: 0; display: block; }
+	.swatch.on { box-shadow: 0 0 0 1px var(--cv-bg), 0 0 0 2px var(--cv-fg-dim); }
+	.sw-amber { background: var(--cv-a-amber); }
+	.sw-blue { background: var(--cv-a-blue); }
+	.sw-green { background: var(--cv-a-green); }
+	.sw-magenta { background: var(--cv-a-magenta); }
+	.sw-cyan { background: var(--cv-a-cyan); }
+	.sw-red { background: var(--cv-a-red); }
+
+	.who { display: flex; align-items: center; gap: 0.7rem; }
+	.uname { color: var(--cv-accent); font-size: 0.8rem; }
+
+	/* --- controls ----------------------------------------------------- */
 	button { cursor: pointer; font: inherit; }
-	.primary { background: var(--accent); color: #fff; border: none; padding: 0.6rem 1rem; border-radius: var(--radius-sm); font-weight: 600; }
-	.primary:hover { background: var(--accent-hover); }
-	.primary:disabled { opacity: 0.5; cursor: default; }
-	.primary.big { font-size: 1.15rem; padding: 0.85rem 1.7rem; }
-	.primary.sm, .ghost.sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
-	.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 0.4rem 0.8rem; border-radius: var(--radius-sm); }
-	.ghost:hover { background: var(--bg-hover); color: var(--text); }
-	.link { background: none; border: none; color: var(--accent-soft); text-decoration: underline; padding: 0; }
+	input {
+		width: 100%; padding: 0.45rem 0.6rem; background: var(--cv-inset);
+		border: 1px solid var(--cv-line); color: var(--cv-fg); font: inherit; font-size: 0.85rem;
+	}
+	input:focus { outline: none; border-color: var(--cv-accent); background: var(--cv-surface); }
+	input:disabled { color: var(--cv-fg-faint); }
 
-	.card-box { max-width: 360px; margin: 3rem auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
-	.card-box form { display: flex; flex-direction: column; gap: 0.7rem; margin: 1rem 0; }
+	.primary {
+		background: var(--cv-accent-bg); color: var(--cv-accent);
+		border: 1px solid var(--cv-accent-line); padding: 0.45rem 1rem;
+		font-size: 0.82rem; letter-spacing: 0.05em;
+	}
+	.primary:hover:not(:disabled) { background: var(--cv-accent-bg-hi); }
+	.primary:disabled { opacity: 0.4; cursor: default; }
+	.primary.big { padding: 0.6rem 1.6rem; font-size: 0.9rem; }
+	.ghost {
+		background: transparent; border: 1px solid var(--cv-line); color: var(--cv-fg-dim);
+		padding: 0.22rem 0.55rem; font-size: 0.72rem;
+	}
+	.ghost:hover { background: var(--cv-shade); color: var(--cv-fg); }
+	.link { background: none; border: none; color: var(--cv-accent); text-decoration: underline; padding: 0; font-size: inherit; }
 
-	.event-bar { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1rem; gap: 1rem; }
-	.event-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; }
-	.phase { padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
-	.phase-picking { background: var(--tag-new-bg); color: var(--tag-new-text); }
-	.phase-voting { background: var(--tag-current-bg); color: var(--tag-current-text); }
-	.phase-runoff, .phase-coinflip { background: var(--tag-promo-bg); color: var(--tag-promo-text); }
-	.phase-concluded { background: var(--bg-hover); color: var(--text-dim); }
+	.err {
+		background: color-mix(in srgb, var(--cv-err) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--cv-err) 45%, transparent);
+		border-left-width: 3px; color: var(--cv-err);
+		padding: 0.5rem 0.75rem; margin: 0.9rem 0; font-size: 0.8rem;
+	}
 
-	.rules { background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 0.7rem 1rem; margin-bottom: 1.25rem; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.4; }
+	.panel-box {
+		max-width: 400px; margin: 3.5rem auto; background: var(--cv-surface);
+		border: 1px solid var(--cv-line); padding: 1.5rem;
+	}
+	.panel-box form { display: flex; flex-direction: column; gap: 0.8rem; margin: 1.1rem 0; }
+	.field { display: flex; flex-direction: column; gap: 0.25rem; }
+	.field > span { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--cv-fg-faint); }
 
-	.layout { display: grid; grid-template-columns: 1fr 220px; gap: 1.5rem; align-items: start; }
+	/* ===================================================================
+	   PHASE STAGE
+	   =================================================================== */
+	.stage { border: 1px solid var(--cv-line); background: var(--cv-surface); margin-bottom: 1.75rem; }
 
-	.search { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
-	.search.greyed input { opacity: 0.55; }
+	.stage-rail {
+		display: flex; align-items: center; gap: 0.5rem;
+		padding: 0.6rem 1rem; border-bottom: 1px solid var(--cv-line);
+		background: var(--cv-inset); flex-wrap: wrap;
+	}
+	.rail-step {
+		display: inline-flex; align-items: center; gap: 0.45rem;
+		padding: 0.18rem 0.55rem; font-size: 0.72rem; letter-spacing: 0.12em;
+		border: 1px solid transparent; color: var(--cv-fg-faint);
+	}
+	.rail-n { font-size: 0.66rem; opacity: 0.75; }
+	.rail-step[data-state='done'] { color: var(--cv-fg-dim); }
+	.rail-step[data-state='done'] .rail-label { text-decoration: line-through; text-decoration-thickness: 1px; }
+	.rail-step[data-state='now'] {
+		color: var(--cv-accent); background: var(--cv-accent-bg);
+		border-color: var(--cv-accent-line);
+	}
+	.rail-sep { flex: 0 0 auto; width: 26px; height: 1px; background: var(--cv-line-hi); }
+	.rail-sep[data-state='done'] { background: var(--cv-accent-line); }
 
-	/* 4 per line on desktop, bigger posters */
-	.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.1rem; }
+	.stage-body { padding: 1.1rem 1rem 1rem; }
+	.stage-line { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+	.stage-title {
+		font-size: 1.45rem; font-weight: 700; letter-spacing: 0.1em;
+		color: var(--cv-accent); margin: 0;
+	}
+	.stage-tag {
+		font-size: 0.68rem; letter-spacing: 0.16em; padding: 0.15rem 0.5rem;
+		background: color-mix(in srgb, var(--cv-warn) 16%, transparent);
+		border: 1px solid color-mix(in srgb, var(--cv-warn) 50%, transparent);
+		color: var(--cv-warn);
+	}
+	.stage-meta { margin-left: auto; font-size: 0.76rem; color: var(--cv-fg-faint); }
+	.stage-desc { color: var(--cv-fg-dim); margin: 0.5rem 0 0; max-width: 74ch; font-size: 0.83rem; }
+
+	.clock {
+		display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap;
+		margin-top: 0.9rem; padding: 0.5rem 0.75rem;
+		background: var(--cv-inset); border: 1px solid var(--cv-line);
+		border-left: 3px solid var(--cv-accent);
+	}
+	.clock-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--cv-fg-faint); }
+	.clock-value { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; color: var(--cv-fg); }
+	.clock-abs { font-size: 0.74rem; color: var(--cv-fg-faint); }
+	.clock.urgent { border-left-color: var(--cv-err); }
+	.clock.urgent .clock-value { color: var(--cv-err); }
+
+	.stage-foot {
+		margin: 0.85rem 0 0; padding-top: 0.6rem; border-top: 1px solid var(--cv-line);
+		font-size: 0.72rem; color: var(--cv-fg-faint); letter-spacing: 0.03em;
+	}
+
+	/* ===================================================================
+	   LAYOUT / GRID
+	   =================================================================== */
+	.layout { display: grid; grid-template-columns: 1fr 210px; gap: 1.75rem; align-items: start; }
+
+	.search { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.1rem; }
+	.search .prompt { margin: 0; }
+	.search.greyed input { color: var(--cv-fg-faint); }
+
+	.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
 	@media (min-width: 640px) { .grid { grid-template-columns: repeat(3, 1fr); } }
 	@media (min-width: 900px) { .grid { grid-template-columns: repeat(4, 1fr); } }
-	.results { margin-bottom: 1rem; }
-	hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+	.results-grid { margin-bottom: 1rem; }
 
-	.poster { position: relative; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; transition: transform 0.12s, border-color 0.12s, opacity 0.2s; }
-	.poster.greyed { opacity: 0.32; filter: grayscale(0.6); }
-	.poster.voted { border-color: var(--success); box-shadow: 0 0 0 2px rgba(61, 170, 109, 0.4); opacity: 1; filter: none; }
-	.poster.winner { border-color: var(--star-color); box-shadow: 0 0 0 2px var(--star-glow); }
-	.poster.dim-out { opacity: 0.35; }
-	.poster-img { position: relative; cursor: pointer; }
+	.poster {
+		position: relative; background: var(--cv-surface); border: 1px solid var(--cv-line);
+		display: flex; flex-direction: column; transition: border-color 0.12s, opacity 0.2s;
+		padding: 0; text-align: left; color: var(--cv-fg);
+	}
+	.poster:hover { border-color: var(--cv-line-hi); }
+	.poster.greyed { opacity: 0.3; filter: grayscale(0.7); }
+	.poster.voted { border-color: var(--cv-accent); background: var(--cv-accent-bg); opacity: 1; filter: none; }
+	.poster.winner { border-color: var(--cv-warn); }
+	.poster.dim-out { opacity: 0.32; }
+	.poster-img { position: relative; cursor: pointer; overflow: hidden; }
 	.poster-img img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; }
-	.poster-img:hover img { filter: brightness(1.08); }
-	.noposter { aspect-ratio: 2/3; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.5rem; color: var(--text-dim); }
+	.poster-img:hover img { filter: brightness(1.07); }
+	.noposter {
+		aspect-ratio: 2/3; display: flex; align-items: center; justify-content: center;
+		text-align: center; padding: 0.5rem; color: var(--cv-fg-faint); background: var(--cv-inset);
+	}
 
-	.cap { padding: 0.5rem 0.6rem 0.35rem; font-size: 0.9rem; line-height: 1.25; flex: 1; }
-	.cap em { color: var(--text-dim); font-style: normal; }
-	.pick-result { padding: 0; border: 1px solid var(--border); text-align: left; color: var(--text); background: var(--bg-card); }
-	.pick-result:hover { border-color: var(--accent); }
-	.pick-result .cap { padding: 0.5rem 0.6rem; }
+	.cap { padding: 0.5rem 0.6rem; font-size: 0.78rem; line-height: 1.35; flex: 1; display: block; }
+	.cap .title { color: var(--cv-fg); }
+	.cap em { color: var(--cv-fg-faint); font-style: normal; }
+	.cap .owner { display: block; color: var(--cv-accent); font-size: 0.72rem; margin-top: 0.15rem; }
+	.pick-result:hover { border-color: var(--cv-accent); }
 
-	.card-actions { display: flex; border-top: 1px solid var(--border); }
-	.act { flex: 1; background: transparent; border: none; color: var(--text-dim); padding: 0.5rem; font-size: 0.82rem; border-right: 1px solid var(--border); }
+	.card-actions { display: flex; border-top: 1px solid var(--cv-line); }
+	.act {
+		flex: 1; background: transparent; border: none; color: var(--cv-fg-faint);
+		padding: 0.4rem; font-size: 0.72rem; letter-spacing: 0.06em;
+		border-right: 1px solid var(--cv-line);
+	}
 	.act:last-child { border-right: none; }
-	.act:hover { background: var(--bg-hover); color: var(--text); }
-	.act.active { color: var(--accent-soft); background: rgba(91, 106, 191, 0.12); }
+	.act:hover { background: var(--cv-shade); color: var(--cv-fg); }
+	.act.active { color: var(--cv-ok); background: color-mix(in srgb, var(--cv-ok) 12%, transparent); }
 
-	.corner { position: absolute; top: 8px; left: 8px; width: 28px; height: 28px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; z-index: 3; background: var(--danger); color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 0 2px rgba(0, 0, 0, 0.25); }
-	.corner:hover { background: var(--danger-hover); }
-	.vote-flag { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; background: var(--success); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; z-index: 3; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+	.corner {
+		position: absolute; top: 0; left: 0; width: 24px; height: 24px; border: none;
+		display: flex; align-items: center; justify-content: center; font-size: 0.75rem; z-index: 3;
+		background: var(--cv-err); color: #fff;
+	}
+	.vote-flag {
+		position: absolute; top: 0; right: 0; width: 24px; height: 24px;
+		background: var(--cv-accent); color: var(--cv-bg);
+		display: flex; align-items: center; justify-content: center; font-weight: 700; z-index: 3;
+	}
+	.win-flag {
+		position: absolute; bottom: 0; left: 0; right: 0; text-align: center;
+		background: var(--cv-warn); color: var(--cv-bg);
+		font-size: 0.68rem; letter-spacing: 0.16em; padding: 0.15rem 0;
+	}
 
-	.panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; position: sticky; top: 1rem; }
-	.panel ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-	.panel li { display: flex; align-items: center; gap: 0.55rem; font-size: 0.9rem; }
-	.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); flex-shrink: 0; }
-	.dot.picked { background: var(--accent-soft); }
-	.dot.voted { background: var(--success); box-shadow: 0 0 6px var(--success); }
+	/* --- side panel ---------------------------------------------------- */
+	.side { border: 1px solid var(--cv-line); background: var(--cv-surface); padding: 0.9rem; position: sticky; top: 1rem; }
+	.side ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+	.side li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; }
+	.pname { color: var(--cv-fg); }
+	.pstate { margin-left: auto; font-size: 0.68rem; color: var(--cv-fg-faint); letter-spacing: 0.06em; }
+	.dot { width: 8px; height: 8px; background: var(--cv-line-hi); flex-shrink: 0; }
+	.dot.picked { background: var(--cv-accent); }
+	.dot.voted { background: var(--cv-ok); }
+	.counter { margin-top: 0.7rem; padding-top: 0.6rem; border-top: 1px solid var(--cv-line); }
 
-	/* tie-breaker */
-	.tiebreaker { text-align: center; margin: 1rem 0 1.5rem; }
-	.tb-title { font-size: 2.4rem; font-weight: 800; letter-spacing: 0.08em; color: var(--star-color); text-shadow: 0 0 20px var(--star-glow); }
-	.tb-sub { color: var(--text-secondary); margin-top: 0.25rem; }
-
-	/* coin */
-	.coin-section { text-align: center; margin: 1rem 0 2rem; min-height: 60px; }
-	.coin-stage { perspective: 800px; margin: 0 auto 1.5rem; width: 170px; height: 170px; }
-	.coin { width: 170px; height: 170px; position: relative; transform-style: preserve-3d; }
-	.coin-face { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; backface-visibility: hidden; border: 5px solid var(--star-color); box-shadow: 0 0 25px var(--star-glow); background: var(--bg-card); }
+	/* --- coin ---------------------------------------------------------- */
+	.coin-section { text-align: center; margin: 0.5rem 0 2rem; }
+	.coin-stage { perspective: 800px; margin: 0 auto 1.5rem; width: 160px; height: 160px; }
+	.coin { width: 160px; height: 160px; position: relative; transform-style: preserve-3d; }
+	.coin-face {
+		position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden;
+		border: 2px solid var(--cv-accent); background: var(--cv-surface);
+	}
 	.coin-face img { width: 100%; height: 100%; object-fit: cover; }
 	.coin-face.back { transform: rotateY(180deg); }
 
-	.results { margin-top: 2rem; }
-	.reel-wrap { position: relative; text-align: center; margin: 1.5rem 0; min-height: 320px; display: flex; align-items: center; justify-content: center; }
+	/* --- results -------------------------------------------------------- */
+	.results { margin-top: 2.5rem; border-top: 1px solid var(--cv-line); padding-top: 1.5rem; }
+	.reel-wrap { position: relative; text-align: center; margin: 1rem 0; min-height: 300px; display: flex; align-items: center; justify-content: center; }
 	.confetti { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
-	.reel { display: inline-flex; flex-direction: column; align-items: center; gap: 0.5rem; }
-	.reel img { width: 200px; aspect-ratio: 2/3; object-fit: cover; border-radius: var(--radius); border: 2px solid var(--star-color); box-shadow: 0 0 18px var(--star-glow); }
-	.reel.spin img { filter: blur(1px) brightness(0.85); border-color: var(--accent); box-shadow: none; }
-	.reel-cap { font-weight: 600; color: var(--text-heading); }
-	.winner-tag { position: absolute; top: 0; font-size: 1.4rem; font-weight: 700; color: var(--star-color); }
+	.reel { display: inline-flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+	.reel img { width: 190px; aspect-ratio: 2/3; object-fit: cover; border: 1px solid var(--cv-warn); }
+	.reel.spin img { filter: blur(1px) brightness(0.85); border-color: var(--cv-line-hi); }
+	.reel-cap { font-size: 0.85rem; color: var(--cv-fg); }
+	.winner-tag {
+		position: absolute; top: 0; font-size: 0.78rem; letter-spacing: 0.22em;
+		color: var(--cv-warn); text-transform: uppercase;
+	}
 
-	.ranking { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-	.ranking td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
-	.ranking .rank { color: var(--text-dim); width: 2rem; }
-	.ranking .pts { text-align: right; color: var(--text-dim); white-space: nowrap; }
-	.ranking tr.win td { color: var(--star-color); font-weight: 600; }
+	.ranking { width: 100%; border-collapse: collapse; margin-top: 1.25rem; font-size: 0.8rem; }
+	.ranking td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--cv-line); }
+	.ranking .rank { color: var(--cv-fg-faint); width: 2.5rem; font-variant-numeric: tabular-nums; }
+	.ranking .pts { text-align: right; color: var(--cv-fg-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+	.ranking tr.win td { color: var(--cv-warn); background: color-mix(in srgb, var(--cv-warn) 8%, transparent); }
 
-	/* info modal */
-	.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
-	.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); max-width: 640px; width: 100%; max-height: 88vh; overflow-y: auto; padding: 1.5rem; position: relative; font-family: 'Century Gothic', 'Futura', sans-serif; }
-	.modal-x { position: absolute; top: 0.75rem; right: 0.75rem; background: var(--bg-hover); border: none; color: var(--text); width: 30px; height: 30px; border-radius: 50%; }
-	.modal-head { display: flex; gap: 1rem; margin-bottom: 1rem; }
-	.modal-poster { width: 120px; aspect-ratio: 2/3; object-fit: cover; border-radius: var(--radius-sm); flex-shrink: 0; }
-	.modal h2 { color: var(--text-heading); margin: 0 0 0.4rem; font-size: 1.3rem; }
-	.rating { color: var(--star-color); font-weight: 700; font-size: 1.1rem; margin-bottom: 0.4rem; }
-	.meta { margin: 0.2rem 0; font-size: 0.9rem; }
-	.imdb-link { color: var(--accent-soft); font-size: 0.85rem; text-decoration: none; }
+	/* --- info modal ------------------------------------------------------ */
+	.modal-back {
+		position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72);
+		display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50;
+	}
+	.modal {
+		background: var(--cv-surface); border: 1px solid var(--cv-line-hi);
+		max-width: 660px; width: 100%; max-height: 88vh; overflow-y: auto;
+		padding: 1.5rem; position: relative; color: var(--cv-fg);
+		font-family: 'JetBrains Mono Variable', 'JetBrains Mono', 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+		font-size: 0.82rem; line-height: 1.55;
+	}
+	.modal .dim { color: var(--cv-fg-dim); }
+	.modal-x {
+		position: absolute; top: 0; right: 0; background: var(--cv-inset);
+		border: none; border-left: 1px solid var(--cv-line); border-bottom: 1px solid var(--cv-line);
+		color: var(--cv-fg-dim); width: 28px; height: 28px;
+	}
+	.modal-x:hover { color: var(--cv-err); }
+	.modal-head { display: flex; gap: 1.1rem; margin-bottom: 1rem; }
+	.modal-poster { width: 115px; aspect-ratio: 2/3; object-fit: cover; flex-shrink: 0; border: 1px solid var(--cv-line); }
+	.rating { color: var(--cv-warn); font-weight: 700; margin-bottom: 0.35rem; }
+	.meta { margin: 0.15rem 0; }
+	.imdb-link { color: var(--cv-accent); font-size: 0.78rem; text-decoration: none; }
 	.imdb-link:hover { text-decoration: underline; }
-	.overview { color: var(--text-secondary); line-height: 1.5; font-size: 0.92rem; }
-	.cast { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-top: 1rem; }
+	.overview { color: var(--cv-fg-dim); }
+	.cast { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.7rem; margin-top: 1.1rem; }
 	.actor { text-align: center; }
-	.actor img, .noface { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-sm); }
-	.noface { display: flex; align-items: center; justify-content: center; background: var(--bg-input); color: var(--text-dim); font-size: 1.5rem; }
-	.actor-name { font-size: 0.8rem; margin-top: 0.3rem; color: var(--text); }
-	.actor-char { font-size: 0.72rem; }
+	.actor img, .noface { width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid var(--cv-line); }
+	.noface { display: flex; align-items: center; justify-content: center; background: var(--cv-inset); color: var(--cv-fg-faint); }
+	.actor-name { font-size: 0.72rem; margin-top: 0.3rem; }
+	.actor-char { font-size: 0.68rem; }
 
 	@media (max-width: 760px) {
 		.layout { grid-template-columns: 1fr; }
-		.panel { position: static; order: -1; }
+		.side { position: static; order: -1; }
 		.cast { grid-template-columns: repeat(3, 1fr); }
 		.modal-head { flex-direction: column; }
-		.modal-poster { width: 100px; }
+		.stage-meta { margin-left: 0; width: 100%; }
+		.stage-title { font-size: 1.2rem; }
+		.cv-head { gap: 0.75rem; }
 	}
 </style>

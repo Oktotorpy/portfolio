@@ -1,9 +1,10 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { cinevote } from '$lib/cinevote.js';
 
 	let events = [];
 	let history = [];
+	let users = [];
 	let message = '';
 	let messageType = '';
 	let newName = '';
@@ -11,12 +12,28 @@
 	let expanded = null; // event id whose picks are shown
 	let picks = [];
 
-	onMount(load);
+	// clock for the "time left" column
+	let tick = Date.now();
+	let serverOffset = 0;
+	let ticker;
+
+	onMount(() => {
+		load();
+		ticker = setInterval(() => (tick = Date.now()), 1000);
+	});
+	onDestroy(() => clearInterval(ticker));
 
 	async function load() {
 		try {
-			events = await cinevote.adminEvents();
+			const res = await cinevote.adminEvents();
+			serverOffset = res.server_now ? Date.parse(res.server_now) - Date.now() : 0;
+			events = res.events.map((e) => ({
+				...e,
+				pick_local: toLocalInput(e.pick_deadline),
+				vote_local: toLocalInput(e.vote_deadline)
+			}));
 			history = await cinevote.history();
+			users = await cinevote.adminUsers();
 		} catch (e) {
 			flash(e.message, 'error');
 		}
@@ -27,6 +44,32 @@
 		setTimeout(() => (message = ''), 4000);
 	}
 
+	// --- datetime-local <-> UTC ISO ---------------------------------------
+	function toLocalInput(iso) {
+		if (!iso) return '';
+		const d = new Date(iso);
+		if (isNaN(d)) return '';
+		const pad = (n) => String(n).padStart(2, '0');
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	}
+	function fromLocalInput(v) {
+		if (!v) return null;
+		const d = new Date(v);
+		return isNaN(d) ? null : d.toISOString();
+	}
+
+	function timeLeft(iso) {
+		if (!iso) return '—';
+		const ms = Date.parse(iso) - (tick + serverOffset);
+		if (isNaN(ms)) return '—';
+		if (ms <= 0) return 'passed';
+		const total = Math.floor(ms / 1000);
+		const d = Math.floor(total / 86400);
+		const h = Math.floor((total % 86400) / 3600);
+		const m = Math.floor((total % 3600) / 60);
+		return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+	}
+
 	async function create() {
 		if (!newDate) return flash('Pick a date', 'error');
 		try {
@@ -34,16 +77,31 @@
 			newName = '';
 			newDate = '';
 			await load();
-			flash('Event created', 'success');
+			flash('Event created — windows scheduled from the date', 'success');
 		} catch (e) {
 			flash(e.message, 'error');
 		}
 	}
-	async function saveDate(ev) {
+	async function saveEvent(ev) {
+		try {
+			await cinevote.adminUpdate(ev.id, {
+				name: ev.name,
+				event_date: ev.event_date,
+				pick_deadline: fromLocalInput(ev.pick_local),
+				vote_deadline: fromLocalInput(ev.vote_local)
+			});
+			await load();
+			flash('Updated', 'success');
+		} catch (e) {
+			flash(e.message, 'error');
+		}
+	}
+	async function saveDateOnly(ev) {
+		// changing the date reschedules both windows server-side
 		try {
 			await cinevote.adminUpdate(ev.id, { name: ev.name, event_date: ev.event_date });
 			await load();
-			flash('Updated', 'success');
+			flash('Date moved — picking/voting windows rescheduled', 'success');
 		} catch (e) {
 			flash(e.message, 'error');
 		}
@@ -53,6 +111,16 @@
 			await cinevote.adminStartVoting(ev.id);
 			await load();
 			flash('Voting opened', 'success');
+		} catch (e) {
+			flash(e.message, 'error');
+		}
+	}
+	async function revert(ev) {
+		if (!confirm(`Step "${ev.name || ev.event_date}" back one phase?`)) return;
+		try {
+			await cinevote.adminRevert(ev.id);
+			await load();
+			flash('Reverted', 'success');
 		} catch (e) {
 			flash(e.message, 'error');
 		}
@@ -95,6 +163,16 @@
 			flash(e.message, 'error');
 		}
 	}
+	async function removeUser(u) {
+		if (!confirm(`Delete user "${u.username}"? Their picks, votes and sessions go with them. This cannot be undone.`)) return;
+		try {
+			await cinevote.adminDeleteUser(u.id);
+			await load();
+			flash(`Deleted ${u.username}`, 'success');
+		} catch (e) {
+			flash(e.message, 'error');
+		}
+	}
 </script>
 
 <h1>CineVote — Events</h1>
@@ -109,11 +187,16 @@
 			<input bind:value={newName} placeholder="Friday Movie Night" />
 		</div>
 		<div class="form-group">
-			<label>Date</label>
+			<label>Premiere date</label>
 			<input type="date" bind:value={newDate} />
 		</div>
 		<button class="btn btn-primary">Add event</button>
 	</form>
+	<p class="hint">
+		Picking opens 6 days before the premiere and runs 4 days; voting takes the last 2 days and closes
+		at midnight (Europe/Prague) as the premiere day begins. Create an event closer than that and the
+		windows compress automatically.
+	</p>
 </div>
 
 <div class="card">
@@ -123,23 +206,34 @@
 	{:else}
 		<table>
 			<thead>
-				<tr><th>Date</th><th>Name</th><th>Status</th><th>Picks</th><th></th></tr>
+				<tr><th>Premiere</th><th>Name</th><th>Status</th><th>Picks</th><th>Picking closes</th><th>Voting closes</th><th></th></tr>
 			</thead>
 			<tbody>
 				{#each events as ev (ev.id)}
 					<tr>
-						<td><input type="date" bind:value={ev.event_date} on:change={() => saveDate(ev)} /></td>
-						<td><input bind:value={ev.name} on:blur={() => saveDate(ev)} placeholder="—" /></td>
+						<td><input type="date" bind:value={ev.event_date} on:change={() => saveDateOnly(ev)} /></td>
+						<td><input bind:value={ev.name} on:blur={() => saveEvent(ev)} placeholder="—" /></td>
 						<td>
 							<span class="badge badge-{ev.status}">{ev.status}</span>
 							{#if ev.is_live}<span class="badge live">LIVE</span>{/if}
 						</td>
 						<td>{ev.picks}</td>
+						<td class="dl">
+							<input type="datetime-local" bind:value={ev.pick_local} on:change={() => saveEvent(ev)} />
+							<span class="left" class:passed={ev.status !== 'picking'}>{ev.status === 'picking' ? timeLeft(ev.pick_deadline) : '—'}</span>
+						</td>
+						<td class="dl">
+							<input type="datetime-local" bind:value={ev.vote_local} on:change={() => saveEvent(ev)} />
+							<span class="left">{ev.status === 'concluded' ? '—' : timeLeft(ev.vote_deadline)}</span>
+						</td>
 						<td class="actions">
 							{#if ev.status === 'picking'}
-								<button class="btn btn-sm btn-primary" on:click={() => startVoting(ev)} title="All people picked → open voting">All picked → Vote</button>
-							{:else if ev.status === 'voting' || ev.status === 'runoff'}
+								<button class="btn btn-sm btn-primary" on:click={() => startVoting(ev)} title="Skip the rest of the picking window">Force → Vote</button>
+							{:else if ev.status === 'voting' || ev.status === 'runoff' || ev.status === 'coinflip'}
 								<button class="btn btn-sm" on:click={() => conclude(ev)}>Conclude</button>
+							{/if}
+							{#if ev.status !== 'picking'}
+								<button class="btn btn-sm" on:click={() => revert(ev)} title="Step back one phase">↩ Revert</button>
 							{/if}
 							<button class="btn btn-sm" on:click={() => managePicks(ev)}>Picks</button>
 							<button class="btn btn-sm btn-danger" on:click={() => del(ev)}>Delete</button>
@@ -147,7 +241,7 @@
 					</tr>
 					{#if expanded === ev.id}
 						<tr>
-							<td colspan="5" class="picks-cell">
+							<td colspan="7" class="picks-cell">
 								{#if picks.length}
 									<div class="pick-chips">
 										{#each picks as p (p.id)}
@@ -166,9 +260,38 @@
 				{/each}
 			</tbody>
 		</table>
-		<p style="color: var(--text-dim); font-size: 0.8rem; margin-top: 0.75rem;">
-			The earliest non-concluded event is LIVE on /cinevote. Change a date to reorder.
+		<p class="hint">
+			The earliest non-concluded event is LIVE on /cinevote. Deadlines are shown in your browser's
+			local time; editing one overrides the schedule for that event, while changing the premiere date
+			recomputes both. Phases advance on their own — the buttons above are the manual override.
 		</p>
+	{/if}
+</div>
+
+<div class="card">
+	<h2>Users</h2>
+	{#if !users.length}
+		<p style="color: var(--text-dim);">Nobody registered yet.</p>
+	{:else}
+		<table>
+			<thead>
+				<tr><th>User</th><th>Registered</th><th>Picks</th><th>Votes</th><th></th></tr>
+			</thead>
+			<tbody>
+				{#each users as u (u.id)}
+					<tr>
+						<td>{u.username}</td>
+						<td style="color: var(--text-dim);">{(u.created_at || '').slice(0, 10)}</td>
+						<td>{u.picks}</td>
+						<td>{u.votes}</td>
+						<td class="actions">
+							<button class="btn btn-sm btn-danger" on:click={() => removeUser(u)}>Delete</button>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+		<p class="hint">Deleting a user also removes their picks, votes, seen flags and sessions.</p>
 	{/if}
 </div>
 
@@ -206,6 +329,10 @@
 	th { text-align: left; color: var(--text-dim); font-size: 0.8rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
 	td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
 	td input { width: 100%; min-width: 90px; }
+	.dl { white-space: nowrap; }
+	.dl input { min-width: 165px; font-size: 0.8rem; }
+	.left { display: block; font-size: 0.72rem; color: var(--text-dim); margin-top: 0.15rem; }
+	.left.passed { color: var(--text-muted); }
 	.actions { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
 	.btn-sm { padding: 0.3rem 0.55rem; font-size: 0.8rem; }
 	.btn-danger { background: var(--danger); color: #fff; border: none; }
@@ -213,7 +340,7 @@
 	.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.72rem; }
 	.badge-picking { background: var(--tag-new-bg); color: var(--tag-new-text); }
 	.badge-voting { background: var(--tag-current-bg); color: var(--tag-current-text); }
-	.badge-runoff { background: var(--tag-promo-bg); color: var(--tag-promo-text); }
+	.badge-runoff, .badge-coinflip { background: var(--tag-promo-bg); color: var(--tag-promo-text); }
 	.badge-concluded { background: var(--bg-hover); color: var(--text-dim); }
 	.badge.live { background: var(--success); color: #fff; margin-left: 0.3rem; }
 	.picks-cell { background: var(--bg-inset); }
@@ -224,5 +351,6 @@
 	.hist { margin-bottom: 1.25rem; }
 	.hist-head { display: flex; justify-content: space-between; margin-bottom: 0.4rem; }
 	.hist-table tr.win td { color: var(--star-color); font-weight: 600; }
+	.hint { color: var(--text-dim); font-size: 0.8rem; margin-top: 0.75rem; line-height: 1.5; }
 	h2 { font-size: 1.05rem; color: var(--text-heading); margin: 0 0 0.75rem; }
 </style>

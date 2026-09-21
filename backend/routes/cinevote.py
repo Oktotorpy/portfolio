@@ -5,6 +5,9 @@ results + CMS admin endpoints.
 
 Lifecycle of an event: picking -> voting -> [runoff] -> concluded.
 - The LIVE event is the earliest-dated event that isn't concluded.
+- Phases are driven by the clock (see cinevote_time): 4 days to pick, then 2 days
+  to vote, and the event concludes at the premiere-day Prague midnight. Only the
+  CMS can force a phase by hand.
 - One pick per user; a movie can only appear once per event.
 - One vote per user per round; you can't vote your own pick.
 - Points: 2 if the voter hasn't watched the movie, 1 if they have (frozen at cast).
@@ -21,6 +24,7 @@ from flask import Blueprint, request, jsonify, make_response, g
 from database import get_db
 from auth import require_auth  # single-admin CMS auth
 import cinevote_auth as cv
+import cinevote_time as ct
 
 bp = Blueprint("cinevote", __name__, url_prefix="/api/cinevote")
 
@@ -169,14 +173,77 @@ def _tmdb_imdb_id(tmdb_id):
 def _live_event(db):
     """The current live event: earliest-dated event that is either not concluded,
     or concluded but whose date is at most 2 days in the past — so the winner/results
-    stay on the live page for 2 days after the movie night, then it drops to history."""
+    stay on the live page for 2 days after the movie night, then it drops to history.
+
+    Reading the live event also advances it past any deadline that has passed."""
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
-    return db.execute(
+    ev = db.execute(
         "SELECT * FROM cinevote_events "
         "WHERE status != 'concluded' OR event_date >= ? "
         "ORDER BY event_date ASC, id ASC LIMIT 1",
         (cutoff,),
     ).fetchone()
+    return _sync_phase(db, ev)
+
+
+def _phase_deadline(ev):
+    """The deadline that the current phase runs against, as a UTC ISO string."""
+    if not ev:
+        return None
+    if ev["status"] == "picking":
+        return ev["pick_deadline"]
+    if ev["status"] in ("voting", "runoff", "coinflip"):
+        return ev["vote_deadline"]
+    return None
+
+
+def _sync_phase(db, ev):
+    """Advance an event whose deadline has passed: picking -> voting at the pick
+    deadline, anything -> concluded at the vote deadline. An event with fewer than
+    2 picks is never advanced — there would be nothing to vote on."""
+    if not ev or ev["status"] == "concluded":
+        return ev
+    npicks = db.execute("SELECT COUNT(*) c FROM cinevote_picks WHERE event_id = ?",
+                        (ev["id"],)).fetchone()["c"]
+    if npicks < 2:
+        return ev
+
+    now = ct.now_utc()
+    vote_dl = ct.parse_iso(ev["vote_deadline"])
+    pick_dl = ct.parse_iso(ev["pick_deadline"])
+
+    if vote_dl and now >= vote_dl:
+        _conclude_by_tally(db, ev["id"])
+    elif ev["status"] == "picking" and pick_dl and now >= pick_dl:
+        db.execute("UPDATE cinevote_events SET status = 'voting' WHERE id = ?", (ev["id"],))
+        db.commit()
+    else:
+        return ev
+    return db.execute("SELECT * FROM cinevote_events WHERE id = ?", (ev["id"],)).fetchone()
+
+
+def _conclude_by_tally(db, eid):
+    """Decide a winner from whatever votes exist: top round-1 score, ties broken by
+    the runoff round if one was held, then by the earliest pick. Used both by the
+    vote deadline and by the CMS 'Conclude now' button."""
+    ev = db.execute("SELECT * FROM cinevote_events WHERE id = ?", (eid,)).fetchone()
+    if not ev or ev["status"] == "concluded":
+        return
+    winners = _leaders(_round_tally(db, eid, 1))
+    if len(winners) > 1:
+        runoff = {pid: pts for pid, pts in _round_tally(db, eid, 2).items() if pid in winners}
+        if runoff:
+            winners = _leaders(runoff)
+    if winners:
+        row = db.execute(
+            "SELECT id FROM cinevote_picks WHERE id IN ({}) ORDER BY created_at ASC, id ASC LIMIT 1"
+            .format(",".join("?" * len(winners))), winners).fetchone()
+    else:  # nobody voted at all
+        row = db.execute(
+            "SELECT id FROM cinevote_picks WHERE event_id = ? ORDER BY created_at ASC, id ASC LIMIT 1",
+            (eid,)).fetchone()
+    if row:
+        _conclude(db, eid, row["id"])
 
 
 def _participants(db, event_id):
@@ -349,8 +416,11 @@ def _serialize_event(db, ev, user_id):
         }
 
     return {
-        "event": {"id": eid, "name": ev["name"], "event_date": ev["event_date"], "status": status},
+        "event": {"id": eid, "name": ev["name"], "event_date": ev["event_date"], "status": status,
+                  "pick_deadline": ev["pick_deadline"], "vote_deadline": ev["vote_deadline"]},
         "phase": status,
+        "phase_deadline": _phase_deadline(ev),
+        "server_now": ct.to_utc_iso(ct.now_utc()),
         "picks": pick_list,
         "participants": part_list,
         "my_pick_id": my_pick_id,
@@ -500,69 +570,6 @@ def vote():
     return jsonify(out)
 
 
-@bp.route("/start-voting", methods=["POST"])
-@cv.require_user
-def user_start_voting():
-    """Live-page 'All movies picked' — any logged-in user opens voting."""
-    db = get_db()
-    ev = _live_event(db)
-    if not ev or ev["status"] != "picking":
-        db.close()
-        return jsonify({"error": "Not in the picking phase"}), 409
-    n = db.execute("SELECT COUNT(*) c FROM cinevote_picks WHERE event_id = ?", (ev["id"],)).fetchone()["c"]
-    if n < 2:
-        db.close()
-        return jsonify({"error": "Need at least 2 picks to start voting"}), 409
-    db.execute("UPDATE cinevote_events SET status = 'voting' WHERE id = ?", (ev["id"],))
-    db.commit()
-    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
-    db.close()
-    return jsonify(out)
-
-
-@bp.route("/revert", methods=["POST"])
-@cv.require_user
-def user_revert():
-    """Step the live event back one phase, keeping picks and (main-round) votes:
-    concluded/runoff -> voting (un-conclude, drop runoff votes), voting -> picking."""
-    db = get_db()
-    ev = _live_event(db)
-    if not ev:
-        db.close()
-        return jsonify({"error": "No live event"}), 409
-    st = ev["status"]
-    if st == "voting":
-        db.execute("UPDATE cinevote_events SET status = 'picking', winner_pick_id = NULL WHERE id = ?", (ev["id"],))
-    elif st in ("runoff", "concluded"):
-        db.execute("DELETE FROM cinevote_votes WHERE event_id = ? AND round = 2", (ev["id"],))
-        db.execute("UPDATE cinevote_events SET status = 'voting', winner_pick_id = NULL WHERE id = ?", (ev["id"],))
-    else:
-        db.close()
-        return jsonify({"error": "Nothing to revert"}), 409
-    db.commit()
-    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
-    db.close()
-    return jsonify(out)
-
-
-@bp.route("/events", methods=["POST"])
-@cv.require_user
-def user_create_event():
-    """Create a movie night from the live page (any logged-in user)."""
-    data = request.get_json() or {}
-    event_date = (data.get("event_date") or "").strip()
-    if not event_date:
-        return jsonify({"error": "Pick a date"}), 400
-    db = get_db()
-    db.execute(
-        "INSERT INTO cinevote_events (name, event_date, status, created_at) VALUES (?,?, 'picking', ?)",
-        ((data.get("name") or "").strip(), event_date, _now()))
-    db.commit()
-    out = _serialize_event(db, _live_event(db), g.cv_user["id"])
-    db.close()
-    return jsonify(out)
-
-
 @bp.route("/flip-coin", methods=["POST"])
 @cv.require_user
 def flip_coin():
@@ -614,9 +621,10 @@ def admin_list_events():
     for ev in evs:
         npicks = db.execute("SELECT COUNT(*) c FROM cinevote_picks WHERE event_id = ?", (ev["id"],)).fetchone()["c"]
         out.append({"id": ev["id"], "name": ev["name"], "event_date": ev["event_date"],
-                    "status": ev["status"], "picks": npicks, "is_live": ev["id"] == live_id})
+                    "status": ev["status"], "picks": npicks, "is_live": ev["id"] == live_id,
+                    "pick_deadline": ev["pick_deadline"], "vote_deadline": ev["vote_deadline"]})
     db.close()
-    return jsonify(out)
+    return jsonify({"events": out, "server_now": ct.to_utc_iso(ct.now_utc())})
 
 
 @bp.route("/admin/events", methods=["POST"])
@@ -626,9 +634,13 @@ def admin_create_event():
     event_date = (data.get("event_date") or "").strip()
     if not event_date:
         return jsonify({"error": "event_date required"}), 400
+    created = _now()
+    pick_dl, vote_dl = ct.compute_deadlines(event_date, created)
     db = get_db()
-    cur = db.execute("INSERT INTO cinevote_events (name, event_date, status, created_at) VALUES (?,?, 'picking', ?)",
-                     ((data.get("name") or "").strip(), event_date, _now()))
+    cur = db.execute(
+        "INSERT INTO cinevote_events (name, event_date, status, pick_deadline, vote_deadline, created_at) "
+        "VALUES (?,?, 'picking', ?,?,?)",
+        ((data.get("name") or "").strip(), event_date, pick_dl, vote_dl, created))
     db.commit()
     eid = cur.lastrowid
     db.close()
@@ -644,8 +656,17 @@ def admin_update_event(eid):
     if not ev:
         db.close()
         return jsonify({"error": "not found"}), 404
-    db.execute("UPDATE cinevote_events SET name = ?, event_date = ? WHERE id = ?",
-               (data.get("name", ev["name"]), data.get("event_date", ev["event_date"]), eid))
+    event_date = data.get("event_date", ev["event_date"])
+    # moving the date reschedules both windows, unless the CMS sets them explicitly
+    if event_date != ev["event_date"]:
+        pick_dl, vote_dl = ct.compute_deadlines(event_date, ev["created_at"])
+    else:
+        pick_dl, vote_dl = ev["pick_deadline"], ev["vote_deadline"]
+    pick_dl = data.get("pick_deadline") or pick_dl
+    vote_dl = data.get("vote_deadline") or vote_dl
+    db.execute(
+        "UPDATE cinevote_events SET name = ?, event_date = ?, pick_deadline = ?, vote_deadline = ? WHERE id = ?",
+        (data.get("name", ev["name"]), event_date, pick_dl, vote_dl, eid))
     db.commit()
     db.close()
     return jsonify({"ok": True})
@@ -689,18 +710,10 @@ def admin_conclude(eid):
     """Manual fallback if someone never votes: tally what we have and conclude."""
     db = get_db()
     ev = db.execute("SELECT * FROM cinevote_events WHERE id = ?", (eid,)).fetchone()
-    if not ev or ev["status"] not in ("voting", "runoff"):
+    if not ev or ev["status"] not in ("voting", "runoff", "coinflip"):
         db.close()
         return jsonify({"error": "Event is not in a voting phase"}), 409
-    scores = _round1_tally(db, eid)
-    if not scores:
-        db.close()
-        return jsonify({"error": "No votes cast yet"}), 409
-    top = max(scores.values())
-    winners = [pid for pid, p in scores.items() if p == top]
-    row = db.execute("SELECT id FROM cinevote_picks WHERE id IN ({}) ORDER BY created_at ASC LIMIT 1"
-                     .format(",".join("?" * len(winners))), winners).fetchone()
-    _conclude(db, eid, row["id"])
+    _conclude_by_tally(db, eid)
     db.close()
     return jsonify({"ok": True})
 
@@ -724,6 +737,63 @@ def admin_delete_pick(pick_id):
     db = get_db()
     db.execute("DELETE FROM cinevote_votes WHERE pick_id = ?", (pick_id,))
     db.execute("DELETE FROM cinevote_picks WHERE id = ?", (pick_id,))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@bp.route("/admin/events/<int:eid>/revert", methods=["POST"])
+@require_auth
+def admin_revert(eid):
+    """Step an event back one phase, keeping picks and main-round votes:
+    concluded/coinflip/runoff -> voting (drops runoff votes), voting -> picking."""
+    db = get_db()
+    ev = db.execute("SELECT * FROM cinevote_events WHERE id = ?", (eid,)).fetchone()
+    if not ev:
+        db.close()
+        return jsonify({"error": "not found"}), 404
+    if ev["status"] == "voting":
+        db.execute("UPDATE cinevote_events SET status = 'picking', winner_pick_id = NULL WHERE id = ?", (eid,))
+    elif ev["status"] in ("runoff", "coinflip", "concluded"):
+        db.execute("DELETE FROM cinevote_votes WHERE event_id = ? AND round = 2", (eid,))
+        db.execute("UPDATE cinevote_events SET status = 'voting', winner_pick_id = NULL WHERE id = ?", (eid,))
+    else:
+        db.close()
+        return jsonify({"error": "Nothing to revert"}), 409
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------- #
+# CMS admin — users
+# --------------------------------------------------------------------------- #
+@bp.route("/admin/users", methods=["GET"])
+@require_auth
+def admin_list_users():
+    db = get_db()
+    rows = db.execute(
+        "SELECT u.id, u.username, u.created_at, "
+        "  (SELECT COUNT(*) FROM cinevote_picks p WHERE p.user_id = u.id) AS picks, "
+        "  (SELECT COUNT(*) FROM cinevote_votes v WHERE v.voter_id = u.id) AS votes "
+        "FROM cinevote_users u ORDER BY u.created_at ASC, u.id ASC").fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.route("/admin/users/<int:uid>", methods=["DELETE"])
+@require_auth
+def admin_delete_user(uid):
+    """Delete a user and everything they own — sessions, picks, votes, seen flags
+    (FK cascades), plus any 'winner' pointer left dangling by their removed picks."""
+    db = get_db()
+    if not db.execute("SELECT 1 FROM cinevote_users WHERE id = ?", (uid,)).fetchone():
+        db.close()
+        return jsonify({"error": "not found"}), 404
+    db.execute(
+        "UPDATE cinevote_events SET winner_pick_id = NULL WHERE winner_pick_id IN "
+        "(SELECT id FROM cinevote_picks WHERE user_id = ?)", (uid,))
+    db.execute("DELETE FROM cinevote_users WHERE id = ?", (uid,))
     db.commit()
     db.close()
     return jsonify({"ok": True})
