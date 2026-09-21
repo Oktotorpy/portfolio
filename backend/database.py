@@ -157,6 +157,8 @@ def _migrate(conn):
                 event_date     TEXT NOT NULL,
                 status         TEXT NOT NULL DEFAULT 'picking',
                 winner_pick_id INTEGER,
+                pick_deadline  TEXT,
+                vote_deadline  TEXT,
                 created_at     TEXT NOT NULL
             );
             CREATE TABLE cinevote_picks (
@@ -212,5 +214,22 @@ def _migrate(conn):
                 DROP TABLE cinevote_votes;
                 ALTER TABLE cinevote_votes_new RENAME TO cinevote_votes;
             """)
+
+    # --- cinevote_events: picking/voting deadlines derived from the event date ---
+    if _table_exists(conn, "cinevote_events"):
+        added = False
+        for col in ("pick_deadline", "vote_deadline"):
+            if not _column_exists(conn, "cinevote_events", col):
+                conn.execute(f"ALTER TABLE cinevote_events ADD COLUMN {col} TEXT")
+                added = True
+        if added:
+            from cinevote_time import compute_deadlines
+            rows = conn.execute(
+                "SELECT id, event_date, created_at FROM cinevote_events").fetchall()
+            for r in rows:
+                pd, vd = compute_deadlines(r["event_date"], r["created_at"])
+                conn.execute(
+                    "UPDATE cinevote_events SET pick_deadline = ?, vote_deadline = ? WHERE id = ?",
+                    (pd, vd, r["id"]))
 
     conn.commit()

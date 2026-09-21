@@ -22,13 +22,10 @@ export const cinevote = {
 	flipCoin: () => req('POST', '/flip-coin'),
 
 	event: () => req('GET', '/event'),
-	createEvent: (data) => req('POST', '/events', data),
 	addPick: (movie) => req('POST', '/pick', movie),
 	deletePick: () => req('DELETE', '/pick'),
 	toggleWatched: (pick_id) => req('POST', '/watched', { pick_id }),
 	vote: (pick_id) => req('POST', '/vote', { pick_id }),
-	startVoting: () => req('POST', '/start-voting'),
-	revert: () => req('POST', '/revert'),
 	history: () => req('GET', '/history'),
 
 	// admin (CMS-auth)
@@ -39,7 +36,10 @@ export const cinevote = {
 	adminEventPicks: (id) => req('GET', `/admin/events/${id}/picks`),
 	adminStartVoting: (id) => req('POST', `/admin/events/${id}/start-voting`),
 	adminConclude: (id) => req('POST', `/admin/events/${id}/conclude`),
-	adminDeletePick: (pickId) => req('DELETE', `/admin/picks/${pickId}`)
+	adminRevert: (id) => req('POST', `/admin/events/${id}/revert`),
+	adminDeletePick: (pickId) => req('DELETE', `/admin/picks/${pickId}`),
+	adminUsers: () => req('GET', '/admin/users'),
+	adminDeleteUser: (id) => req('DELETE', `/admin/users/${id}`)
 };
 
 export function imdbUrl(pick) {

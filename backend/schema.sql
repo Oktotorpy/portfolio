@@ -209,8 +209,10 @@ CREATE TABLE IF NOT EXISTS cinevote_events (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     name           TEXT NOT NULL DEFAULT '',
     event_date     TEXT NOT NULL,                    -- ISO date of the movie night
-    status         TEXT NOT NULL DEFAULT 'picking',  -- picking | voting | runoff | concluded
+    status         TEXT NOT NULL DEFAULT 'picking',  -- picking | voting | runoff | coinflip | concluded
     winner_pick_id INTEGER,                          -- set when concluded
+    pick_deadline  TEXT,                             -- UTC ISO: picking closes, voting opens
+    vote_deadline  TEXT,                             -- UTC ISO: voting closes (premiere-day midnight, Europe/Prague)
     created_at     TEXT NOT NULL
 );
 
